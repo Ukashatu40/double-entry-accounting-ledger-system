@@ -86,6 +86,15 @@ export const CHART_OF_ACCOUNTS: AccountSeed[] = [
     currency: 'EUR',
     description: 'Intermediate holding account used during EUR FX conversion entries',
   },
+  {
+    code: '1042',
+    name: 'FX Conversion Holding – INR',
+    type: 'ASSET',
+    subType: 'FX_HOLDING',
+    currency: 'INR',
+    description:
+      'Intermediate holding account used during FX conversion entries (target currency leg)',
+  },
 
   // ── LIABILITIES ───────────────────────────────────────────────────────────
   {

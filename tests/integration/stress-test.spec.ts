@@ -97,6 +97,8 @@ describe('1,000-transaction stress test across all 20 types (integration)', () =
       gatewayExpense: '5001',
       cashbackExpense: '5002',
       interestExpense: '5003',
+      fxHoldingUsd: '1040',
+      fxHoldingInr: '1042',
     };
 
     for (const [key, code] of Object.entries(codes)) {
@@ -360,6 +362,8 @@ describe('1,000-transaction stress test across all 20 types (integration)', () =
         sourceWalletId: A['walletUsd'],
         targetWalletId: A['wallet'],
         fxRevenueAccountId: A['fxRevenue'],
+        fxHoldingSourceAccountId: A['fxHoldingUsd'],
+        fxHoldingTargetAccountId: A['fxHoldingInr'],
         sourceAmount: amt(5, 100),
         exchangeRate: '83.5000',
         sourceCurrency: 'USD',

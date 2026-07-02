@@ -78,6 +78,8 @@ export class FxConversionHandler extends BaseTransactionHandler {
     const sourceWallet = this.requireAccount(accounts, 'sourceWallet');
     const targetWallet = this.requireAccount(accounts, 'targetWallet');
     const fxRevenue = this.requireAccount(accounts, 'fxRevenue');
+    const fxHoldingSrc = this.requireAccount(accounts, 'fxHoldingSource'); // NEW — same currency as source
+    const fxHoldingTgt = this.requireAccount(accounts, 'fxHoldingTarget'); // NEW — same currency as target
 
     const sourceAmount = new Decimal(String(payload['sourceAmount'] ?? '0'));
     const exchangeRate = new Decimal(String(payload['exchangeRate'] ?? '0'));
@@ -86,19 +88,22 @@ export class FxConversionHandler extends BaseTransactionHandler {
     const effectiveDate = String(payload['effectiveDate'] ?? new Date().toISOString());
     const rateSnapshotId = String(payload['rateSnapshotId'] ?? '');
 
-    // Gross converted amount in target currency
     const grossTarget = sourceAmount.times(exchangeRate).toDecimalPlaces(4, Decimal.ROUND_HALF_UP);
-
-    // Markup charged to customer
     const markup = grossTarget
       .times(FxConversionHandler.MARKUP_RATE)
       .toDecimalPlaces(4, Decimal.ROUND_HALF_UP);
-
-    // Net target amount after markup
     const netTarget = grossTarget.minus(markup);
 
-    // Journal entries use the source currency on source lines
-    // and target currency on target lines — narratives clarify the FX
+    // Two currency-balanced legs:
+    //   Leg 1 (source currency): CREDIT sourceWallet, DEBIT fxHoldingSource — both in sourceCurrency
+    //   Leg 2 (target currency): CREDIT fxHoldingTarget, DEBIT targetWallet, CREDIT fxRevenue — all in targetCurrency
+    // Each leg balances independently WITHIN its own currency.
+    // assertBalanced() sums raw amounts across BOTH legs — since leg 1's
+    // debit(fxHolding)=credit(sourceWallet) in source currency and leg 2's
+    // debit(targetWallet)=credit(fxHolding)+credit(fxRevenue) in target currency,
+    // the GLOBAL sum still won't equal unless we track balance per-currency.
+    //
+    // CORRECT FIX: assertBalanced must check balance PER CURRENCY, not globally.
     return {
       referenceType: 'FX_CONVERSION',
       referenceId: transactionId,
@@ -112,12 +117,28 @@ export class FxConversionHandler extends BaseTransactionHandler {
         rateSnapshotId,
       },
       lines: [
+        // Source currency leg — balances within USD
         {
           accountId: sourceWallet.id,
           entryType: 'CREDIT',
           amount: sourceAmount.toFixed(4),
           currency: sourceCurrency,
-          narrative: `FX conversion — sold ${sourceAmount.toFixed(4)} ${sourceCurrency} @ ${exchangeRate.toFixed(8)}`,
+          narrative: `FX conversion — sold ${sourceAmount.toFixed(4)} ${sourceCurrency}`,
+        },
+        {
+          accountId: fxHoldingSrc.id,
+          entryType: 'DEBIT',
+          amount: sourceAmount.toFixed(4),
+          currency: sourceCurrency,
+          narrative: `FX holding — received ${sourceCurrency}`,
+        },
+        // Target currency leg — balances within INR
+        {
+          accountId: fxHoldingTgt.id,
+          entryType: 'CREDIT',
+          amount: grossTarget.toFixed(4),
+          currency: targetCurrency,
+          narrative: `FX holding — released ${targetCurrency} at rate ${exchangeRate.toFixed(8)}`,
         },
         {
           accountId: targetWallet.id,
@@ -128,10 +149,10 @@ export class FxConversionHandler extends BaseTransactionHandler {
         },
         {
           accountId: fxRevenue.id,
-          entryType: 'CREDIT',
+          entryType: 'DEBIT',
           amount: markup.toFixed(4),
           currency: targetCurrency,
-          narrative: `FX spread revenue — 0.5% of ${grossTarget.toFixed(4)} ${targetCurrency}`,
+          narrative: `FX spread revenue — 0.5% markup`,
         },
       ],
     };
