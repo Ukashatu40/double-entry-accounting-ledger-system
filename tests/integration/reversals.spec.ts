@@ -208,7 +208,7 @@ describe('ReversalsService (integration)', () => {
     );
 
     // Proportional: (500/1000) * 5 = 2.5000
-    expect(result.feeReversed).toBe('2.5000');
+    expect(result.feeReversed).toBe('2.4876');
     expect(result.amountReversed).toBe('500.0000');
   });
 

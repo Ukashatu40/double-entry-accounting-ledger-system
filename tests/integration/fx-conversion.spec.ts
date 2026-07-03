@@ -19,6 +19,7 @@ import { cleanDatabase, closePrisma } from './setup';
 import appConfig from '@config/app.config';
 import databaseConfig from '@config/database.config';
 import Decimal from 'decimal.js';
+import { beforeEach } from 'node:test';
 
 jest.setTimeout(60_000);
 
@@ -82,7 +83,7 @@ describe('FX Conversion (integration)', () => {
 
   beforeEach(async () => {
     await cleanDatabase();
-    // Ensure a fresh, valid USD/INR rate exists for every test
+    // Always insert a guaranteed-fresh rate — don't rely on prior state
     await fxRate.ingestRate({
       baseCurrency: 'USD',
       quoteCurrency: 'INR',
@@ -213,13 +214,31 @@ describe('FX Conversion (integration)', () => {
     expect(balanceAfter.minus(balanceBefore).toFixed(4)).toBe(netExpected.toFixed(4));
   });
 
+  // tests/integration/fx-conversion.spec.ts
   it('rejects conversion when the rate is stale beyond FX_RATE_MAX_AGE_MINUTES', async () => {
-    // Ingest a rate already outside the validity window by backdating capturedAt
-    // via direct DB write (fxRate.ingestRate always sets capturedAt = now()).
     const prisma = db as unknown as PrismaClient;
+
+    // Close the active rate (immutability trigger permits setting valid_until
+    // on an otherwise-active snapshot — this is the one mutation allowed).
     await prisma.exchangeRateSnapshot.updateMany({
       where: { baseCurrency: 'USD', quoteCurrency: 'INR', validUntil: null },
-      data: { capturedAt: new Date(Date.now() - 2 * 60 * 60 * 1000) }, // 2 hours ago
+      data: { validUntil: new Date() },
+    });
+
+    // Insert a NEW row directly with a backdated capturedAt. This is an
+    // INSERT, not an UPDATE, so the immutability trigger does not block it.
+    await prisma.exchangeRateSnapshot.create({
+      data: {
+        id: uuidv7(),
+        baseCurrency: 'USD',
+        quoteCurrency: 'INR',
+        rate: '83.5000',
+        inverseRate: '0.01197605',
+        source: 'STALE_TEST',
+        capturedAt: new Date(Date.now() - 2 * 60 * 60 * 1000),
+        validFrom: new Date(Date.now() - 2 * 60 * 60 * 1000),
+        validUntil: null,
+      },
     });
 
     await fundUsdWallet('1000.0000');

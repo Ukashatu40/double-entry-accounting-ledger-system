@@ -76,7 +76,7 @@ export class ReversalsService {
     }
 
     // Verify not already reversed
-    await this.assertNotFullyReversed(dto.originalTransactionId);
+    await this.assertNotAlreadyReversed(dto.originalTransactionId);
 
     // Compute total reversed amount for the reversal record
     const totalAmount = originalEntries
@@ -186,7 +186,7 @@ export class ReversalsService {
       );
     }
 
-    await this.assertNotAlreadyReversed(dto.originalTransactionId);
+    await this.assertNotFullyReversed(dto.originalTransactionId);
 
     // Total original amount (sum of all debit lines)
     const originalAmount = originalEntries
@@ -338,24 +338,6 @@ export class ReversalsService {
   }
 
   /**
-   * Prevent double-reversals — an already-reversed transaction cannot
-   * be reversed again. Checks the reversals table, not a mutable status field.
-   */
-  private async assertNotAlreadyReversed(transactionId: string): Promise<void> {
-    const existing = await this.db.reversal.findFirst({
-      where: { originalTransactionId: transactionId },
-    });
-
-    if (existing) {
-      throw new ConflictException(
-        `Transaction ${transactionId} has already been reversed ` +
-          `(reversalId: ${existing.id}). ` +
-          `Use partial refund if you need to reverse a different amount.`,
-      );
-    }
-  }
-
-  /**
    * Cumulative refund guard — total refunded across all partial refunds
    * must never exceed the original transaction amount.
    *
@@ -410,24 +392,47 @@ export class ReversalsService {
    * transaction's economic effect has already been completely undone.
    */
   private async assertNotFullyReversed(transactionId: string): Promise<void> {
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    // const fullReversal = await this.db.reversal.findFirst({
-    //   where: { originalTransactionId: transactionId, feePolicy: 'FULL', amount: undefined },
-    // });
-    // A full reversal is recorded with feePolicy: 'FULL' AND amount equal to
-    // the entire original amount. We distinguish it from a partial refund
-    // that happens to also use the FULL fee policy by checking the reversal
-    // was created via reverseTransaction() specifically. Since reverseTransaction()
-    // always stores feePolicy: 'FULL', but so can a 100% partial refund, the
-    // safest signal is whether reversalTransactionId's referenceType was
-    // REFUND_FULL vs REFUND_PARTIAL — stored on the Transaction row itself.
-    const transaction = await this.db.transaction.findUnique({
-      where: { id: transactionId },
+    const originalEntries = await this.db.ledgerEntry.findMany({
+      where: { referenceId: transactionId, status: 'POSTED' },
     });
-    if (transaction?.status === 'REVERSED') {
+
+    const originalAmount = originalEntries
+      .filter((e) => e.entryType === 'DEBIT')
+      .reduce((sum, e) => sum.plus(new Decimal(e.amount.toString())), new Decimal(0));
+
+    const priorFullReversal = await this.db.reversal.findFirst({
+      where: {
+        originalTransactionId: transactionId,
+        feePolicy: 'FULL',
+        amount: originalAmount.toFixed(4),
+      },
+    });
+
+    if (priorFullReversal) {
       throw new ConflictException(
-        `Transaction ${transactionId} has already been fully reversed. ` +
+        `Transaction ${transactionId} has already been fully reversed ` +
+          `(reversalId: ${priorFullReversal.id}). ` +
           `No further partial refunds can be issued against it.`,
+      );
+    }
+  }
+
+  private async assertNotAlreadyReversed(transactionId: string): Promise<void> {
+    const existing = await this.db.reversal.findFirst({
+      where: { originalTransactionId: transactionId },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    this.logger.debug(
+      `assertNotAlreadyReversed check for ${transactionId}: ` +
+        `found=${existing ? existing.id : 'none'}`,
+    );
+
+    if (existing) {
+      throw new ConflictException(
+        `Transaction ${transactionId} has already been reversed ` +
+          `(reversalId: ${existing.id}). ` +
+          `Use partial refund if you need to reverse a different amount.`,
       );
     }
   }

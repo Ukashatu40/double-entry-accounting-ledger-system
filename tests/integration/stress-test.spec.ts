@@ -29,6 +29,8 @@ import { ReportingModule } from '@reporting/reporting.module';
 import { TrialBalanceService } from '@reporting/trial-balance.service';
 import { AuditModule } from '@audit/audit.module';
 import { AuditService } from '@audit/audit.service';
+import { FxModule } from '@fx/fx.module';
+import { FxRateService } from '@fx/fx-rate.service';
 import { cleanDatabase, closePrisma } from './setup';
 import appConfig from '@config/app.config';
 import databaseConfig from '@config/database.config';
@@ -64,6 +66,7 @@ describe('1,000-transaction stress test across all 20 types (integration)', () =
         ReversalsModule,
         ReportingModule,
         AuditModule,
+        FxModule,
       ],
     }).compile();
 
@@ -73,6 +76,15 @@ describe('1,000-transaction stress test across all 20 types (integration)', () =
     reversals = app.get(ReversalsService);
     trialBalance = app.get(TrialBalanceService);
     audit = app.get(AuditService);
+
+    const fxRateService = app.get(FxRateService);
+    await fxRateService.ingestRate({
+      baseCurrency: 'USD',
+      quoteCurrency: 'INR',
+      rate: '83.5000',
+      source: 'STRESS_TEST',
+      validFrom: new Date().toISOString(),
+    });
 
     await cleanDatabase();
 
