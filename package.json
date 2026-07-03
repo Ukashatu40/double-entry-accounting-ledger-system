@@ -35,7 +35,7 @@
     "hash:verify": "ts-node -r tsconfig-paths/register scripts/verify-hashes.ts",
     "test:load:withdrawal": "k6 run tests/load/concurrent-withdrawal.js",
     "test:load:migration": "k6 run tests/load/migration-during-load.js",
-    "test:stress": "jest --selectProjects integration --runInBand --testPathPattern=stress-test --testTimeout=180000",
+    "test:stress": "jest --selectProjects integration --runInBand --testPathPattern=stress-test --testTimeout=180000 --forceExit",
     "trial-balance": "ts-node -r tsconfig-paths/register scripts/trial-balance-check.ts",
     "partitions:manage": "ts-node -r tsconfig-paths/register scripts/manage-partitions.ts"
   },

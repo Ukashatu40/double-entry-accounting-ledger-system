@@ -267,6 +267,7 @@ describe('1,000-transaction stress test across all 20 types (integration)', () =
       payload: {
         senderWalletId: A['wallet'],
         recipientWalletId: A['wallet2'],
+        feeRevenueAccountId: A['feeRevenue'],
         amount: amt(10, 300),
         currency: 'INR',
       },
@@ -291,8 +292,6 @@ describe('1,000-transaction stress test across all 20 types (integration)', () =
         walletAccountId: A['wallet'],
         merchantAccountId: A['merchantSettlement'],
         feeRevenueAccountId: A['feeRevenue'],
-        gatewayExpenseAccountId: A['gatewayExpense'],
-        merchantPayableAccountId: A['merchantPayable'],
         amount: amt(20, 1000),
         currency: 'INR',
         merchantName: 'Stress Online Merchant',
