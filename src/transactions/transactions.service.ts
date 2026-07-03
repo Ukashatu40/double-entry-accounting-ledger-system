@@ -49,6 +49,7 @@ export class TransactionsService {
     private readonly ledger: LedgerService,
     private readonly accounts: AccountsRepository,
     private readonly idempotency: IdempotencyService,
+    private readonly fxConversionHandler: FxConversionHandler, // ← DI-injected
   ) {
     this.handlers = {
       CUSTOMER_DEPOSIT_BANK: new DepositBankHandler(),
@@ -65,7 +66,7 @@ export class TransactionsService {
       PROMOTIONAL_CREDIT: new PromotionalCreditHandler(),
       LOAN_DISBURSEMENT: new LoanDisbursementHandler(),
       LOAN_EMI_PAYMENT: new LoanEmiPaymentHandler(),
-      FX_CONVERSION: new FxConversionHandler(),
+      FX_CONVERSION: this.fxConversionHandler, // ← use injected instance, not `new`
       REFUND_FULL: new RefundFullHandler(),
       REFUND_PARTIAL: new RefundPartialHandler(),
       CHARGEBACK: new ChargebackHandler(),

@@ -76,7 +76,7 @@ export class ReversalsService {
     }
 
     // Verify not already reversed
-    await this.assertNotAlreadyReversed(dto.originalTransactionId);
+    await this.assertNotFullyReversed(dto.originalTransactionId);
 
     // Compute total reversed amount for the reversal record
     const totalAmount = originalEntries
@@ -400,5 +400,35 @@ export class ReversalsService {
       journalId: '',
       postedAt: record.createdAt.toISOString(),
     };
+  }
+
+  /**
+   * Prevent a partial refund on a transaction that has already been
+   * FULLY reversed. Multiple partial refunds against the same transaction
+   * are allowed (up to the cumulative limit) — only a prior FULL reversal
+   * blocks further partial refunds, since a full reversal means the
+   * transaction's economic effect has already been completely undone.
+   */
+  private async assertNotFullyReversed(transactionId: string): Promise<void> {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    // const fullReversal = await this.db.reversal.findFirst({
+    //   where: { originalTransactionId: transactionId, feePolicy: 'FULL', amount: undefined },
+    // });
+    // A full reversal is recorded with feePolicy: 'FULL' AND amount equal to
+    // the entire original amount. We distinguish it from a partial refund
+    // that happens to also use the FULL fee policy by checking the reversal
+    // was created via reverseTransaction() specifically. Since reverseTransaction()
+    // always stores feePolicy: 'FULL', but so can a 100% partial refund, the
+    // safest signal is whether reversalTransactionId's referenceType was
+    // REFUND_FULL vs REFUND_PARTIAL — stored on the Transaction row itself.
+    const transaction = await this.db.transaction.findUnique({
+      where: { id: transactionId },
+    });
+    if (transaction?.status === 'REVERSED') {
+      throw new ConflictException(
+        `Transaction ${transactionId} has already been fully reversed. ` +
+          `No further partial refunds can be issued against it.`,
+      );
+    }
   }
 }
