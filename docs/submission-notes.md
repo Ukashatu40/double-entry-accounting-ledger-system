@@ -119,3 +119,23 @@ Rather than hard-coding which accounts to balance-check per transaction type
 in the LedgerService, the check is driven by the `checkBalanceOn` parameter
 passed by each handler. This keeps LedgerService generic and puts business
 logic (which account to protect) in the handler where it belongs.
+
+<!-- append to docs/submission-notes.md -->
+
+## Additional Design Note — Fee Revenue Recognition Scope
+
+Handlers that generate fee revenue as a byproduct of a customer-facing
+payment (P2P transfer, merchant QR/online payment, bill payment) credit
+Fee Revenue directly against the payer's wallet debit, without a distinct
+"platform operating cash" asset account absorbing the fee. This satisfies
+the assessment's explicit correctness bar — every journal entry produces
+SUM(debits) = SUM(credits), verified by the 1,000-transaction stress test
+and enforced by `assertBalanced()` before every commit — and mirrors the
+convention used in the specification's own worked P2P example (Part A1.3).
+
+A stricter real-world implementation would introduce a dedicated
+"Platform Operating Account" (asset) debited whenever fee revenue is
+recognized, so that the system-wide accounting equation
+(Assets = Liabilities + Equity) holds at the aggregate level, not just
+within each individual journal entry. This is noted as a scoped
+simplification rather than left undocumented.

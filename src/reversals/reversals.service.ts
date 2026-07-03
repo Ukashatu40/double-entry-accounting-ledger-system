@@ -234,9 +234,13 @@ export class ReversalsService {
     const currency = originalEntries[0]?.currency ?? 'INR';
     const reversalTransactionId = uuidv7();
 
+    const sortedByAmount = [...originalEntries].sort((a, b) =>
+      new Decimal(b.amount.toString()).comparedTo(new Decimal(a.amount.toString())),
+    );
+
     // Find the wallet (credit) account from original entries
-    const walletEntry = originalEntries.find((e) => e.entryType === 'CREDIT');
-    const merchantEntry = originalEntries.find((e) => e.entryType === 'DEBIT');
+    const walletEntry = sortedByAmount[0];
+    const merchantEntry = sortedByAmount[1];
 
     if (!walletEntry || !merchantEntry) {
       throw new UnprocessableEntityException(
