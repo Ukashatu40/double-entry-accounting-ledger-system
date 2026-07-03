@@ -32,17 +32,30 @@ const prisma = new PrismaClient({ adapter });
  * Reference data (accounts, exchange_rate_snapshots) is preserved.
  */
 export async function cleanDatabase(): Promise<void> {
-  // TRUNCATE CASCADE handles FK order automatically
-  await prisma.$executeRawUnsafe(`
-    TRUNCATE TABLE
-      balance_snapshots,
-      idempotency_keys,
-      reversals,
-      audit_events,
-      ledger_entries,
-      transactions
-    RESTART IDENTITY CASCADE
-  `);
+  const maxRetries = 3;
+
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      await prisma.$executeRawUnsafe(`
+        TRUNCATE TABLE
+          balance_snapshots,
+          idempotency_keys,
+          reversals,
+          audit_events,
+          ledger_entries,
+          transactions
+        RESTART IDENTITY CASCADE
+      `);
+      return;
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      if (msg.includes('deadlock') && attempt < maxRetries) {
+        await new Promise((resolve) => setTimeout(resolve, 200 * attempt));
+        continue;
+      }
+      throw error;
+    }
+  }
 }
 
 export async function closePrisma(): Promise<void> {

@@ -1,4 +1,4 @@
-// jest.config.ts
+// jest.config.ts — add maxWorkers: 1 at the top level
 import type { Config } from 'jest';
 
 const sharedModuleNameMapper = {
@@ -18,7 +18,7 @@ const sharedModuleNameMapper = {
 const config: Config = {
   rootDir: '.',
   testEnvironment: 'node',
-  testTimeout: 30_000,
+  testTimeout: 60_000, // bumped from 30s — integration suites need headroom
   moduleFileExtensions: ['js', 'json', 'ts'],
   transform: {
     '^.+\\.(t|j)s$': ['ts-jest', { tsconfig: 'tsconfig.json' }],
@@ -35,6 +35,18 @@ const config: Config = {
       statements: 80,
     },
   },
+
+  // CRITICAL: forces every test FILE across every PROJECT to run one at a
+  // time, in a single worker process. Integration tests share one physical
+  // PostgreSQL test database — if two spec files run concurrently, one
+  // file's cleanDatabase() TRUNCATE can wipe rows out from under another
+  // file's in-flight assertions, causing deadlocks, "transaction not found"
+  // errors, and balances/entry-counts that make no sense (data from two
+  // tests bleeding together). Unit tests are unaffected by this (they
+  // don't touch the DB) but running everything serially is a small,
+  // acceptable cost for correctness.
+  maxWorkers: 1,
+
   projects: [
     {
       displayName: 'unit',
@@ -48,7 +60,7 @@ const config: Config = {
     {
       displayName: 'integration',
       testEnvironment: 'node',
-      testMatch: ['<rootDir>/tests/integration/*.spec.ts'],
+      testMatch: ['<rootDir>/tests/integration/**/*.spec.ts'],
       transform: {
         '^.+\\.(t|j)s$': ['ts-jest', { tsconfig: 'tsconfig.json' }],
       },
