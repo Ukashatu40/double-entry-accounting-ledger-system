@@ -19,18 +19,18 @@ import { FxExposureService } from './fx-exposure.service';
 @Controller('reports')
 export class ReportingController {
   constructor(
-    private readonly trialBalance: TrialBalanceService,
-    private readonly accountStatement: AccountStatementService,
-    private readonly incomeStatement: IncomeStatementService,
-    private readonly balanceSheet: BalanceSheetService,
-    private readonly fxExposure: FxExposureService,
+    private readonly trialBalanceService: TrialBalanceService,
+    private readonly accountStatementService: AccountStatementService,
+    private readonly incomeStatementService: IncomeStatementService,
+    private readonly balanceSheetService: BalanceSheetService,
+    private readonly fxExposureService: FxExposureService,
   ) {}
 
   @Get('trial-balance')
   @ApiOperation({ summary: 'Trial balance as of any date' })
   @ApiQuery({ name: 'asOf', required: false, example: '2026-06-27T23:59:59Z' })
-  async trialBalances(@Query('asOf') asOf?: string): Promise<object> {
-    return this.trialBalance.generate(asOf ? new Date(asOf) : undefined);
+  async trialBalance(@Query('asOf') asOf?: string): Promise<object> {
+    return this.trialBalanceService.generate(asOf ? new Date(asOf) : undefined);
   }
 
   @Get('accounts/:id/statement')
@@ -40,7 +40,7 @@ export class ReportingController {
   @ApiQuery({ name: 'to', required: false })
   @ApiQuery({ name: 'page', required: false, example: '1' })
   @ApiQuery({ name: 'pageSize', required: false, example: '50' })
-  async accountStatements(
+  async accountStatement(
     @Param('id', new ParseUUIDPipe()) id: string,
     @Query('from') from?: string,
     @Query('to') to?: string,
@@ -49,7 +49,7 @@ export class ReportingController {
   ): Promise<object> {
     const fromDate = from ? new Date(from) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
     const toDate = to ? new Date(to) : new Date();
-    return this.accountStatement.generate(
+    return this.accountStatementService.generate(
       id,
       fromDate,
       toDate,
@@ -62,10 +62,10 @@ export class ReportingController {
   @ApiOperation({ summary: 'Income statement (P&L) for a period' })
   @ApiQuery({ name: 'from', required: false })
   @ApiQuery({ name: 'to', required: false })
-  async incomeStatements(@Query('from') from?: string, @Query('to') to?: string): Promise<object> {
+  async incomeStatement(@Query('from') from?: string, @Query('to') to?: string): Promise<object> {
     const fromDate = from ? new Date(from) : new Date(new Date().getFullYear(), 0, 1);
     const toDate = to ? new Date(to) : new Date();
-    return this.incomeStatement.generate(fromDate, toDate);
+    return this.incomeStatementService.generate(fromDate, toDate);
   }
 
   @Get('balance-sheet')
@@ -74,14 +74,14 @@ export class ReportingController {
     description: 'isBalanced must always be true. Any discrepancy is a ledger integrity issue.',
   })
   @ApiQuery({ name: 'asOf', required: false })
-  async balanceSheets(@Query('asOf') asOf?: string): Promise<object> {
-    return this.balanceSheet.generate(asOf ? new Date(asOf) : new Date());
+  async balanceSheet(@Query('asOf') asOf?: string): Promise<object> {
+    return this.balanceSheetService.generate(asOf ? new Date(asOf) : new Date());
   }
 
   @Get('fx-exposure')
   @ApiOperation({ summary: 'Foreign currency exposure with INR equivalents' })
   @ApiQuery({ name: 'asOf', required: false })
-  async fxExposures(@Query('asOf') asOf?: string): Promise<object> {
-    return this.fxExposure.generate(asOf ? new Date(asOf) : new Date());
+  async fxExposure(@Query('asOf') asOf?: string): Promise<object> {
+    return this.fxExposureService.generate(asOf ? new Date(asOf) : new Date());
   }
 }

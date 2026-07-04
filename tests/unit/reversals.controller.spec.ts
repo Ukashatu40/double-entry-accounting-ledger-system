@@ -28,7 +28,9 @@ describe('ReversalsController', () => {
       });
 
       const dto = { originalTransactionId: 'orig-1', reason: 'Test reason here' };
-      const result = await controller.fullReversal(dto, 'test-actor', 'idem-1');
+      const result = (await controller.fullReversal(dto, 'test-actor', 'idem-1')) as {
+        reversalId: string;
+      };
       expect(result.reversalId).toBe('rev-1');
     });
 
@@ -58,7 +60,9 @@ describe('ReversalsController', () => {
         feePolicy: 'PROPORTIONAL',
         reason: 'Test reason',
       } as never;
-      const result = await controller.partialRefund(dto, 'test-actor', 'idem-2');
+      const result = (await controller.partialRefund(dto, 'test-actor', 'idem-2')) as {
+        amountReversed: string;
+      };
       expect(result.amountReversed).toBe('300.0000');
     });
 
