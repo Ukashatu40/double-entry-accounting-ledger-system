@@ -2,7 +2,7 @@
 // Day 15 deliverable: 1,000-transaction randomised stress test across all 20 types
 // Also satisfies Day 9's 500-transaction requirement and the "Zero-Defect Ledger"
 // achievement badge (spec Part B5).
-//
+
 // Strategy: attempt 1,000 transactions spread across all 20 types. Business-rule
 // rejections (insufficient balance, validation errors) are EXPECTED and do not
 // fail the test — only entries that DO post must keep the trial balance and
