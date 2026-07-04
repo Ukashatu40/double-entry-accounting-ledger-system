@@ -2,7 +2,7 @@
 import { UnauthorizedException, type ExecutionContext } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Reflector } from '@nestjs/core';
-import { ApiKeyGuard, IS_PUBLIC_KEY } from '@common/guards/api-key.guard';
+import { ApiKeyGuard } from '@common/guards/api-key.guard';
 
 function makeMockContext(headers: Record<string, string> = {}): ExecutionContext {
   return {

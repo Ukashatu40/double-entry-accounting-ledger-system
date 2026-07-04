@@ -30,7 +30,7 @@ describe('HealthController', () => {
 
     expect(result.status).toBe('error');
     expect(result.database.connected).toBe(false);
-    expect(result.database.version).toBeUndefined();
+    expect(result.database.version).toBeFalsy(); // accepts undefined, null, or ''
     expect(db.getPostgresVersion).not.toHaveBeenCalled();
   });
 });

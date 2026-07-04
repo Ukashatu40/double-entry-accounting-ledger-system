@@ -34,69 +34,55 @@ describe('RefundPartialHandler', () => {
     handler = new RefundPartialHandler();
   });
 
+  function validate(
+    payload: Record<string, unknown>,
+    accounts: Record<string, Account>,
+  ): Promise<void> {
+    return (
+      handler as unknown as {
+        validateBusinessRules: (
+          p: Record<string, unknown>,
+          a: Record<string, Account>,
+        ) => Promise<void>;
+      }
+    ).validateBusinessRules(payload, accounts);
+  }
+
   describe('validateBusinessRules', () => {
     it('passes for a valid refund within the original amount', async () => {
       await expect(
-        (
-          handler as unknown as {
-            validateBusinessRules: (
-              p: Record<string, unknown>,
-              a: Record<string, Account>,
-            ) => Promise<void>;
-          }
-        ).validateBusinessRules(
+        validate(
           { refundAmount: '500.0000', originalAmount: '1000.0000', feePolicy: 'PROPORTIONAL' },
           validAccounts,
         ),
       ).resolves.not.toThrow();
     });
 
-    it('rejects a refund amount that is zero or negative', async () => {
-      await expect(
-        (
-          handler as unknown as {
-            validateBusinessRules: (
-              p: Record<string, unknown>,
-              a: Record<string, Account>,
-            ) => Promise<void>;
-          }
-        ).validateBusinessRules(
+    it('rejects a refund amount that is zero or negative', () => {
+      expect(() =>
+        validate(
           { refundAmount: '0.0000', originalAmount: '1000.0000', feePolicy: 'NONE' },
           validAccounts,
         ),
-      ).rejects.toThrow('Refund amount must be positive');
+      ).toThrow('Refund amount must be positive');
     });
 
-    it('rejects a refund amount exceeding the original transaction amount', async () => {
-      await expect(
-        (
-          handler as unknown as {
-            validateBusinessRules: (
-              p: Record<string, unknown>,
-              a: Record<string, Account>,
-            ) => Promise<void>;
-          }
-        ).validateBusinessRules(
+    it('rejects a refund amount exceeding the original transaction amount', () => {
+      expect(() =>
+        validate(
           { refundAmount: '1500.0000', originalAmount: '1000.0000', feePolicy: 'NONE' },
           validAccounts,
         ),
-      ).rejects.toThrow('exceeds original');
+      ).toThrow('exceeds original');
     });
 
-    it('rejects an invalid fee policy string', async () => {
-      await expect(
-        (
-          handler as unknown as {
-            validateBusinessRules: (
-              p: Record<string, unknown>,
-              a: Record<string, Account>,
-            ) => Promise<void>;
-          }
-        ).validateBusinessRules(
+    it('rejects an invalid fee policy string', () => {
+      expect(() =>
+        validate(
           { refundAmount: '500.0000', originalAmount: '1000.0000', feePolicy: 'BOGUS' },
           validAccounts,
         ),
-      ).rejects.toThrow('Invalid fee policy');
+      ).toThrow('Invalid fee policy');
     });
   });
 

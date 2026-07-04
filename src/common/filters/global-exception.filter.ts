@@ -62,7 +62,7 @@ function resolveErrorCode(exception: unknown): { type: string; code: string } {
     if (msg.includes('unbalanced journal'))
       return { type: 'UNBALANCED_JOURNAL_ENTRY', code: 'TXN_4002' };
     if (msg.includes('idempotency')) return { type: 'IDEMPOTENCY_CONFLICT', code: 'TXN_4003' };
-    if (msg.includes('stale rate') || msg.includes('expired rate'))
+    if (msg.includes('is stale') || msg.includes('expired rate'))
       return { type: 'STALE_EXCHANGE_RATE', code: 'FX_4001' };
     if (msg.includes('hash chain')) return { type: 'AUDIT_CHAIN_VIOLATION', code: 'AUD_5001' };
     if (msg.includes('already reversed')) return { type: 'ALREADY_REVERSED', code: 'TXN_4004' };
