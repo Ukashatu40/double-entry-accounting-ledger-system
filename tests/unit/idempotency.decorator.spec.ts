@@ -15,4 +15,10 @@ describe('resolveIdempotencyKey', () => {
       resolveIdempotencyKey({ 'x-idempotency-key': 12345 as unknown as string }),
     ).toBeUndefined();
   });
+
+  it('returns undefined when the header value is an array rather than a string', () => {
+    expect(
+      resolveIdempotencyKey({ 'x-idempotency-key': ['a', 'b'] as unknown as string }),
+    ).toBeUndefined();
+  });
 });
