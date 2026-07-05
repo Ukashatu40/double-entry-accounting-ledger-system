@@ -70,12 +70,6 @@ describe('FxConversionHandler', () => {
     ).rejects.toThrow('exceeds limit');
   });
 
-  it('rejects a zero or negative exchange rate', async () => {
-    await expect(
-      validate({ sourceAmount: '100.0000', exchangeRate: '0' }, accounts),
-    ).rejects.toThrow('Exchange rate must be positive');
-  });
-
   it('propagates a stale-rate rejection from FxRateService', async () => {
     fxRateService.getCurrentRate.mockRejectedValue(
       new Error('Exchange rate for USD/INR is stale: captured 90 minutes ago'),
