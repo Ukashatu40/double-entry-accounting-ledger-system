@@ -25,4 +25,10 @@ describe('resolveActorFromHeaders', () => {
       'user_456',
     );
   });
+
+  it('falls back to SYSTEM when X-API-Key is present but not a string (e.g. array)', () => {
+    expect(resolveActorFromHeaders({ 'x-api-key': ['not-a-string'] as unknown as string })).toBe(
+      'SYSTEM',
+    );
+  });
 });

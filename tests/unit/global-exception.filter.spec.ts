@@ -118,4 +118,60 @@ describe('GlobalExceptionFilter', () => {
     expect(body.error.message).toBe('Request validation failed');
     expect(body.error.details.validation_errors).toHaveLength(2);
   });
+
+  it('extracts message and details from an HttpException object response with a string message', () => {
+    const { host, reply } = makeMockHost();
+    const exception = new HttpException(
+      { message: 'Custom error message', details: { field: 'amount' } },
+      HttpStatus.BAD_REQUEST,
+    );
+    filter.catch(exception, host);
+    const body = reply.send.mock.calls[0][0];
+    expect(body.error.message).toBe('Custom error message');
+    expect(body.error.details).toEqual({ field: 'amount' });
+  });
+
+  it('includes stack trace in details when NODE_ENV is development', () => {
+    const originalEnv = process.env['NODE_ENV'];
+    process.env['NODE_ENV'] = 'development';
+
+    const { host, reply } = makeMockHost();
+    filter.catch(new Error('dev mode error'), host);
+    const body = reply.send.mock.calls[0][0];
+    expect(body.error.details.stack).toBeDefined();
+
+    process.env['NODE_ENV'] = originalEnv;
+  });
+
+  it('omits stack trace in details when NODE_ENV is production', () => {
+    const originalEnv = process.env['NODE_ENV'];
+    process.env['NODE_ENV'] = 'production';
+
+    const { host, reply } = makeMockHost();
+    filter.catch(new Error('prod mode error'), host);
+    const body = reply.send.mock.calls[0][0];
+    expect(body.error.details).toBeUndefined();
+
+    process.env['NODE_ENV'] = originalEnv;
+  });
+
+  it('logs at warn level (not error) for 4xx status codes', () => {
+    const { host } = makeMockHost();
+    const loggerWarnSpy = jest.spyOn(
+      (filter as unknown as { logger: { warn: (...args: unknown[]) => void } }).logger,
+      'warn',
+    );
+    filter.catch(new HttpException('Bad request', HttpStatus.BAD_REQUEST), host);
+    expect(loggerWarnSpy).toHaveBeenCalled();
+  });
+
+  it('logs at error level for 5xx status codes', () => {
+    const { host } = makeMockHost();
+    const loggerErrorSpy = jest.spyOn(
+      (filter as unknown as { logger: { error: (...args: unknown[]) => void } }).logger,
+      'error',
+    );
+    filter.catch(new Error('server error'), host);
+    expect(loggerErrorSpy).toHaveBeenCalled();
+  });
 });
