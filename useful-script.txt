@@ -1,0 +1,20 @@
+# 1. Wipe dev database before each load test
+docker exec -it ledger_postgres psql -U ledger_user -d ledger_db -c "
+TRUNCATE TABLE balance_snapshots, idempotency_keys, reversals,
+               audit_events, ledger_entries RESTART IDENTITY CASCADE;
+"
+
+# 2. Get account IDs
+WALLET=$(curl -s -H "X-API-Key: dev-api-key-change-in-production" \
+  http://localhost:3000/api/v1/accounts/code/1001 | jq -r '.id')
+LIABILITY=$(curl -s -H "X-API-Key: dev-api-key-change-in-production" \
+  http://localhost:3000/api/v1/accounts/code/2001 | jq -r '.id')
+
+# 3. Run load test
+k6 run tests/load/concurrent-withdrawal.js \
+  --env WALLET_ID=$WALLET \
+  --env LIABILITY_ID=$LIABILITY
+
+k6 run tests/load/migration-during-load.js \
+  --env WALLET_ID=$WALLET
+
