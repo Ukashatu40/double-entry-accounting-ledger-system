@@ -36,6 +36,6 @@
       "@health/*": ["src/health/*"]
     }
   },
-  "include": ["src/**/*", "seeds/**/*", "scripts/**/*"],
-  "exclude": ["node_modules", "dist", "tests"]
+  "include": ["src/**/*", "seeds/**/*", "scripts/**/*", "tests/**/*"],
+  "exclude": ["node_modules", "dist"]
 }
