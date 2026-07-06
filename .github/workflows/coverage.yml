@@ -1,0 +1,79 @@
+# .github/workflows/coverage.yml
+name: Coverage Report
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  coverage:
+    name: Generate Coverage Report
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: ledger_user
+          POSTGRES_PASSWORD: ledger_pass
+          POSTGRES_DB: ledger_test_db
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U ledger_user -d ledger_test_db"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql://ledger_user:ledger_pass@localhost:5433/ledger_test_db?schema=public
+      TEST_DATABASE_URL: postgresql://ledger_user:ledger_pass@localhost:5433/ledger_test_db?schema=public
+      GENESIS_HASH: '0000000000000000000000000000000000000000000000000000000000000000'
+      IDEMPOTENCY_TTL_HOURS: '24'
+      FX_RATE_MAX_AGE_MINUTES: '60'
+      API_KEYS: 'ci-test-api-key'
+      LOG_LEVEL: 'silent'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci --legacy-peer-deps
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      - name: Apply migrations and triggers
+        run: |
+          npx prisma migrate deploy
+          PGPASSWORD=ledger_pass psql -h localhost -p 5433 -U ledger_user -d ledger_test_db \
+            -f database/triggers/003_immutability_triggers.sql
+          PGPASSWORD=ledger_pass psql -h localhost -p 5433 -U ledger_user -d ledger_test_db \
+            -f database/triggers/008_partition_ledger_entries.sql
+
+      - name: Seed database
+        run: npm run db:seed:test
+
+      - name: Run full coverage report
+        run: npm run test:cov
+
+      - name: Upload coverage HTML report as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: docs/coverage/
+          retention-days: 30
+
+      - name: Comment coverage summary on commit
+        run: |
+          echo "## Coverage Summary" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          cat docs/coverage/lcov-report/index.html | grep -A 4 "fraction" | head -20 >> "$GITHUB_STEP_SUMMARY" || true
+          echo '```' >> "$GITHUB_STEP_SUMMARY"

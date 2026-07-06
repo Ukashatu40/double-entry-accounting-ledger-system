@@ -1,0 +1,226 @@
+# .github/workflows/ci.yml
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  lint-and-build:
+    name: Lint & Build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci --legacy-peer-deps
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build
+        run: npm run build
+
+  unit-tests:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    needs: lint-and-build
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci --legacy-peer-deps
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      - name: Run unit tests
+        run: npm run test:unit
+
+  integration-tests:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    needs: lint-and-build
+
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: ledger_user
+          POSTGRES_PASSWORD: ledger_pass
+          POSTGRES_DB: ledger_test_db
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U ledger_user -d ledger_test_db"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql://ledger_user:ledger_pass@localhost:5433/ledger_test_db?schema=public
+      TEST_DATABASE_URL: postgresql://ledger_user:ledger_pass@localhost:5433/ledger_test_db?schema=public
+      GENESIS_HASH: '0000000000000000000000000000000000000000000000000000000000000000'
+      IDEMPOTENCY_TTL_HOURS: '24'
+      FX_RATE_MAX_AGE_MINUTES: '60'
+      API_KEYS: 'ci-test-api-key'
+      LOG_LEVEL: 'silent'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci --legacy-peer-deps
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      - name: Apply Prisma migrations
+        run: npx prisma migrate deploy
+
+      - name: Apply immutability triggers
+        run: |
+          PGPASSWORD=ledger_pass psql -h localhost -p 5433 -U ledger_user -d ledger_test_db \
+            -f database/triggers/003_immutability_triggers.sql
+
+      - name: Apply table partitioning
+        run: |
+          PGPASSWORD=ledger_pass psql -h localhost -p 5433 -U ledger_user -d ledger_test_db \
+            -f database/triggers/008_partition_ledger_entries.sql
+
+      - name: Seed database
+        run: npm run db:seed:test
+
+      - name: Run integration tests
+        run: npm run test:integration
+
+      - name: Run 1,000-transaction stress test
+        run: npm run test:stress
+
+  load-tests:
+    name: k6 Load Tests
+    runs-on: ubuntu-latest
+    needs: integration-tests
+    # Load tests run against a live running instance of the app —
+    # only run on pushes to main to avoid slowing down every PR
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: ledger_user
+          POSTGRES_PASSWORD: ledger_pass
+          POSTGRES_DB: ledger_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ledger_user -d ledger_db"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql://ledger_user:ledger_pass@localhost:5432/ledger_db?schema=public
+      GENESIS_HASH: '0000000000000000000000000000000000000000000000000000000000000000'
+      IDEMPOTENCY_TTL_HOURS: '24'
+      FX_RATE_MAX_AGE_MINUTES: '60'
+      API_KEYS: 'dev-api-key-change-in-production'
+      LOG_LEVEL: 'silent'
+      PORT: '3000'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci --legacy-peer-deps
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      - name: Apply migrations and triggers
+        run: |
+          npx prisma migrate deploy
+          PGPASSWORD=ledger_pass psql -h localhost -p 5432 -U ledger_user -d ledger_db \
+            -f database/triggers/003_immutability_triggers.sql
+          PGPASSWORD=ledger_pass psql -h localhost -p 5432 -U ledger_user -d ledger_db \
+            -f database/triggers/008_partition_ledger_entries.sql
+
+      - name: Seed database
+        run: npm run db:seed
+
+      - name: Build application
+        run: npm run build
+
+      - name: Start application in background
+        run: |
+          node dist/main &
+          echo "Waiting for app to be healthy..."
+          for i in {1..30}; do
+            curl -sf http://localhost:3000/api/v1/health && break
+            sleep 1
+          done
+
+      - name: Install k6
+        run: |
+          sudo gpg -k
+          sudo gpg --no-default-keyring --keyring /usr/share/keyrings/k6-archive-keyring.gpg --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys C5AD17C747E3415A3642D57D77C6C491D6AC1D69
+          echo "deb [signed-by=/usr/share/keyrings/k6-archive-keyring.gpg] https://dl.k6.io/deb stable main" | sudo tee /etc/apt/sources.list.d/k6.list
+          sudo apt-get update
+          sudo apt-get install k6
+
+      - name: Fetch seeded account IDs
+        id: accounts
+        run: |
+          WALLET=$(curl -s -H "X-API-Key: dev-api-key-change-in-production" http://localhost:3000/api/v1/accounts/code/1001 | jq -r '.id')
+          LIABILITY=$(curl -s -H "X-API-Key: dev-api-key-change-in-production" http://localhost:3000/api/v1/accounts/code/2001 | jq -r '.id')
+          echo "wallet=$WALLET" >> "$GITHUB_OUTPUT"
+          echo "liability=$LIABILITY" >> "$GITHUB_OUTPUT"
+
+      - name: Run concurrent withdrawal load test
+        run: |
+          k6 run tests/load/concurrent-withdrawal.js \
+            --env WALLET_ID=${{ steps.accounts.outputs.wallet }} \
+            --env LIABILITY_ID=${{ steps.accounts.outputs.liability }}
+
+      - name: Run zero-downtime migration load test
+        run: |
+          k6 run tests/load/migration-during-load.js \
+            --env WALLET_ID=${{ steps.accounts.outputs.wallet }} &
+          sleep 5
+          PGPASSWORD=ledger_pass psql -h localhost -p 5432 -U ledger_user -d ledger_db \
+            -f database/triggers/009_add_risk_score_column.sql
+          wait

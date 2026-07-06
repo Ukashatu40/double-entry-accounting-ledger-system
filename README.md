@@ -1,5 +1,8 @@
 # BED-6C-Ukashatu-Ledger
 
+![CI](https://github.com/Ukashatu40/BED-6C-Ukashatu-Ledger/actions/workflows/ci.yml/badge.svg)
+![Coverage](https://github.com/Ukashatu40/BED-6C-Ukashatu-Ledger/actions/workflows/coverage.yml/badge.svg)
+
 **Neo-banking Ledger System with Double-Entry Accounting & Immutable Audit Trail**  
 Zetheta Algorithms Assessment BED-6C | Intern ID: 493556B
 

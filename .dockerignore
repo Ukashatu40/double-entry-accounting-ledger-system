@@ -1,0 +1,13 @@
+# .dockerignore
+node_modules
+dist
+docs/coverage
+.git
+.env
+.env.local
+*.log
+npm-debug.log*
+.DS_Store
+tests/
+docs/
+database/
