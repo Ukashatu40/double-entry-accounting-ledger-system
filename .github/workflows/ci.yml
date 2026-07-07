@@ -187,12 +187,23 @@ jobs:
 
       - name: Start application in background
         run: |
-          node dist/main &
+          nohup node dist/main > app.log 2>&1 &
+          echo "APP_PID=$!" >> "$GITHUB_ENV"
           echo "Waiting for app to be healthy..."
           for i in {1..30}; do
-            curl -sf http://localhost:3000/api/v1/health && break
+            if curl -sf http://localhost:3000/api/v1/health > /dev/null 2>&1; then
+              echo "App is healthy after ${i}s"
+              exit 0
+            fi
             sleep 1
           done
+          echo "App failed to become healthy within 30s. Logs:"
+          cat app.log
+          exit 1
+
+      - name: Print app logs (diagnostic)
+        if: always()
+        run: cat app.log || echo "No app.log found"
 
       - name: Install k6
         run: |
