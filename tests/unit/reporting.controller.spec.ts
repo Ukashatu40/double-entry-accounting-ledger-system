@@ -24,7 +24,7 @@ describe('ReportingController', () => {
     incomeStatementSvc = { generate: jest.fn() } as unknown as jest.Mocked<IncomeStatementService>;
     balanceSheetSvc = { generate: jest.fn() } as unknown as jest.Mocked<BalanceSheetService>;
     fxExposureSvc = { generate: jest.fn() } as unknown as jest.Mocked<FxExposureService>;
-    reconciliationSvc = { reconcile: jest.fn() } as unknown as jest.Mocked<ReconciliationService>;
+    reconciliationSvc = { generate: jest.fn() } as unknown as jest.Mocked<ReconciliationService>;
 
     controller = new ReportingController(
       trialBalanceSvc,
