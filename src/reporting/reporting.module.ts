@@ -5,6 +5,7 @@ import { AccountStatementService } from './account-statement.service';
 import { IncomeStatementService } from './income-statement.service';
 import { BalanceSheetService } from './balance-sheet.service';
 import { FxExposureService } from './fx-exposure.service';
+import { ReconciliationService } from './reconciliation.service';
 import { ReportingController } from './reporting.controller';
 
 @Module({
@@ -15,6 +16,7 @@ import { ReportingController } from './reporting.controller';
     IncomeStatementService,
     BalanceSheetService,
     FxExposureService,
+    ReconciliationService,
   ],
   exports: [
     TrialBalanceService,
@@ -22,6 +24,7 @@ import { ReportingController } from './reporting.controller';
     IncomeStatementService,
     BalanceSheetService,
     FxExposureService,
+    ReconciliationService,
   ],
 })
 export class ReportingModule {}

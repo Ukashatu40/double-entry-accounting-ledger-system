@@ -1,5 +1,5 @@
 // src/reporting/reporting.controller.ts
-import { Controller, Get, Param, Query, ParseUUIDPipe } from '@nestjs/common';
+import { Controller, Get, Param, Query, ParseUUIDPipe, Post, Body } from '@nestjs/common';
 import {
   ApiTags,
   ApiSecurity,
@@ -13,6 +13,8 @@ import { AccountStatementService } from './account-statement.service';
 import { IncomeStatementService } from './income-statement.service';
 import { BalanceSheetService } from './balance-sheet.service';
 import { FxExposureService } from './fx-exposure.service';
+import { ReconciliationService } from './reconciliation.service';
+import { ReconciliationRequestDto } from './dto/reconciliation.dto';
 
 @ApiTags('reporting')
 @ApiSecurity('api-key')
@@ -24,6 +26,7 @@ export class ReportingController {
     private readonly incomeStatementService: IncomeStatementService,
     private readonly balanceSheetService: BalanceSheetService,
     private readonly fxExposureService: FxExposureService,
+    private readonly reconciliationService: ReconciliationService,
   ) {}
 
   @Get('trial-balance')
@@ -83,5 +86,24 @@ export class ReportingController {
   @ApiQuery({ name: 'asOf', required: false })
   async fxExposure(@Query('asOf') asOf?: string): Promise<object> {
     return this.fxExposureService.generate(asOf ? new Date(asOf) : new Date());
+  }
+
+  @Post('reconciliation')
+  @ApiOperation({
+    summary: 'Reconcile ledger transactions against an external statement',
+    description:
+      'Compares internal ledger transactions within a date range against an ' +
+      'external source (bank statement, payment gateway settlement, NPCI UPI ' +
+      'settlement file). Flags MATCHED, AMOUNT_MISMATCH, MISSING_IN_LEDGER ' +
+      '(recorded externally but not internally — higher risk), and ' +
+      'MISSING_IN_EXTERNAL (recorded internally but not externally). ' +
+      'Addresses spec Case Study 1 (Paytm/NPCI reconciliation crisis).',
+  })
+  async reconciliation(@Body() dto: ReconciliationRequestDto): Promise<object> {
+    return this.reconciliationService.reconcile(
+      new Date(dto.from),
+      new Date(dto.to),
+      dto.externalStatement,
+    );
   }
 }

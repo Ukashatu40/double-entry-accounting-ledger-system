@@ -5,6 +5,7 @@ import type { AccountStatementService } from '@reporting/account-statement.servi
 import type { IncomeStatementService } from '@reporting/income-statement.service';
 import type { BalanceSheetService } from '@reporting/balance-sheet.service';
 import type { FxExposureService } from '@reporting/fx-exposure.service';
+import { ReconciliationService } from '@reporting/reconciliation.service';
 
 describe('ReportingController', () => {
   let controller: ReportingController;
@@ -13,6 +14,7 @@ describe('ReportingController', () => {
   let incomeStatementSvc: jest.Mocked<IncomeStatementService>;
   let balanceSheetSvc: jest.Mocked<BalanceSheetService>;
   let fxExposureSvc: jest.Mocked<FxExposureService>;
+  let reconciliationSvc: jest.Mocked<ReconciliationService>;
 
   beforeEach(() => {
     trialBalanceSvc = { generate: jest.fn() } as unknown as jest.Mocked<TrialBalanceService>;
@@ -22,6 +24,7 @@ describe('ReportingController', () => {
     incomeStatementSvc = { generate: jest.fn() } as unknown as jest.Mocked<IncomeStatementService>;
     balanceSheetSvc = { generate: jest.fn() } as unknown as jest.Mocked<BalanceSheetService>;
     fxExposureSvc = { generate: jest.fn() } as unknown as jest.Mocked<FxExposureService>;
+    reconciliationSvc = { reconcile: jest.fn() } as unknown as jest.Mocked<ReconciliationService>;
 
     controller = new ReportingController(
       trialBalanceSvc,
@@ -29,6 +32,7 @@ describe('ReportingController', () => {
       incomeStatementSvc,
       balanceSheetSvc,
       fxExposureSvc,
+      reconciliationSvc,
     );
   });
 
