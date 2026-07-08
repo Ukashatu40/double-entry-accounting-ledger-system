@@ -9,13 +9,18 @@ import {
   ApiQuery,
 } from '@nestjs/swagger';
 import { FxRateService } from './fx-rate.service';
+import { FxRevaluationService } from './fx-revaluation.service';
+
 import { CreateExchangeRateDto, ExchangeRateResponseDto } from './dto/exchange-rate.dto';
 
 @ApiTags('fx')
 @ApiSecurity('api-key')
 @Controller('fx')
 export class FxController {
-  constructor(private readonly service: FxRateService) {}
+  constructor(
+    private readonly service: FxRateService,
+    private readonly revaluationService: FxRevaluationService,
+  ) {}
 
   @Post('rates')
   @HttpCode(HttpStatus.CREATED)
@@ -83,5 +88,25 @@ export class FxController {
       rate: result.rate.toFixed(8),
       rateSnapshotId: result.snapshotId,
     };
+  }
+
+  @Post('revaluation/run')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Run the unrealised FX gain/loss revaluation batch job',
+    description:
+      'Revalues all foreign-currency balances at the current closing rate and ' +
+      'posts the unrealised gain/loss difference to a dedicated P&L account, ' +
+      'offset against an FX revaluation suspense account. Designed to run ' +
+      'nightly via a scheduled job (spec A3.3). No customer wallet is touched — ' +
+      'this is a reporting-only adjustment, not a real currency conversion.',
+  })
+  async runRevaluation(
+    @Body() body: { suspenseAccountId: string; asOfDate?: string },
+  ): Promise<object> {
+    return this.revaluationService.runRevaluation(
+      body.asOfDate ? new Date(body.asOfDate) : new Date(),
+      body.suspenseAccountId,
+    );
   }
 }

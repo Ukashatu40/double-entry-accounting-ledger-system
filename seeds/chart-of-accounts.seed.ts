@@ -254,6 +254,36 @@ export const CHART_OF_ACCOUNTS: AccountSeed[] = [
       'Temporary holding for entries that cannot be immediately classified. ' +
       'Must be zero-balanced at month-end.',
   },
+  {
+    code: '4004',
+    name: 'Unrealised FX Gain',
+    type: 'REVENUE',
+    subType: 'OPERATING_REVENUE',
+    currency: 'INR',
+    description:
+      'Paper gain from revaluing foreign-currency balances at closing rate. ' +
+      'Reversed and re-posted each revaluation cycle — never accumulates ' +
+      'across periods (spec A3.3).',
+  },
+  {
+    code: '5004',
+    name: 'Unrealised FX Loss',
+    type: 'EXPENSE',
+    subType: 'FINANCIAL_EXPENSE',
+    currency: 'INR',
+    description: 'Paper loss from revaluing foreign-currency balances at closing rate.',
+  },
+  {
+    code: '1043',
+    name: 'FX Revaluation Suspense',
+    type: 'ASSET',
+    subType: 'FX_HOLDING',
+    currency: 'INR',
+    description:
+      'Offsetting account for unrealised FX revaluation journal entries. ' +
+      'Nets to zero over time as gains and losses alternate — not a real ' +
+      'cash position, purely a balancing mechanism for reporting-only entries.',
+  },
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────

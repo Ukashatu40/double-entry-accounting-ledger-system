@@ -1,6 +1,7 @@
 // tests/unit/fx.controller.spec.ts
 import { FxController } from '@fx/fx.controller';
 import type { FxRateService } from '@fx/fx-rate.service';
+import { FxRevaluationService } from '@fx/fx-revaluation.service';
 import Decimal from 'decimal.js';
 import type { ExchangeRateSnapshot } from '@prisma/client';
 
@@ -23,6 +24,7 @@ function makeSnapshot(overrides: Partial<ExchangeRateSnapshot> = {}): ExchangeRa
 describe('FxController', () => {
   let controller: FxController;
   let service: jest.Mocked<FxRateService>;
+  let revaluationService: jest.Mocked<FxRevaluationService>;
 
   beforeEach(() => {
     service = {
@@ -31,7 +33,10 @@ describe('FxController', () => {
       listRates: jest.fn(),
       computeConversion: jest.fn(),
     } as unknown as jest.Mocked<FxRateService>;
-    controller = new FxController(service);
+    revaluationService = {
+      runRevaluation: jest.fn(),
+    } as unknown as jest.Mocked<FxRevaluationService>;
+    controller = new FxController(service, revaluationService as unknown as FxRevaluationService);
   });
 
   it('ingestRate() delegates to the service and maps the response', async () => {
