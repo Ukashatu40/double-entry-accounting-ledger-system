@@ -1,0 +1,1089 @@
+openapi: 3.0.0
+paths:
+  /health:
+    get:
+      operationId: HealthController_check
+      summary: System health check
+      parameters: []
+      responses:
+        '200':
+          description: ''
+      tags:
+        - health
+  /accounts:
+    post:
+      operationId: AccountsController_create
+      summary: Create a new account
+      description: Add a new account to the Chart of Accounts. Account codes must be unique. Currency is immutable after creation.
+      parameters: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateAccountDto'
+      responses:
+        '201':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountResponseDto'
+      tags:
+        - accounts
+      security:
+        - api-key: []
+    get:
+      operationId: AccountsController_findAll
+      summary: List all accounts
+      description: Returns the full Chart of Accounts, optionally filtered by type, status, or currency.
+      parameters:
+        - name: type
+          required: false
+          in: query
+          schema:
+            enum:
+              - ASSET
+              - LIABILITY
+              - EQUITY
+              - REVENUE
+              - EXPENSE
+              - CONTRA_ASSET
+              - CONTRA_REVENUE
+            type: string
+        - name: status
+          required: false
+          in: query
+          schema:
+            enum:
+              - ACTIVE
+              - INACTIVE
+              - CLOSED
+              - SUSPENDED
+            type: string
+        - name: currency
+          required: false
+          in: query
+          schema:
+            example: INR
+            type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AccountResponseDto'
+      tags:
+        - accounts
+      security:
+        - api-key: []
+  /accounts/{id}:
+    get:
+      operationId: AccountsController_findById
+      summary: Get account by ID
+      parameters:
+        - name: id
+          required: true
+          in: path
+          description: Account UUID
+          schema:
+            type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountResponseDto'
+      tags:
+        - accounts
+      security:
+        - api-key: []
+  /accounts/code/{code}:
+    get:
+      operationId: AccountsController_findByCode
+      summary: Get account by code
+      description: e.g. GET /accounts/code/1001
+      parameters:
+        - name: code
+          required: true
+          in: path
+          schema:
+            example: '1001'
+            type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountResponseDto'
+      tags:
+        - accounts
+      security:
+        - api-key: []
+  /accounts/{id}/deactivate:
+    patch:
+      operationId: AccountsController_deactivate
+      summary: Deactivate an account
+      description: >-
+        Marks an account as INACTIVE. The account and all its ledger entries remain permanently — immutability is never
+        violated.
+      parameters:
+        - name: id
+          required: true
+          in: path
+          schema:
+            type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountResponseDto'
+      tags:
+        - accounts
+      security:
+        - api-key: []
+  /ledger/journal-entries:
+    post:
+      operationId: LedgerController_postJournalEntry
+      summary: Post a journal entry
+      description: >-
+        Creates a balanced set of debit/credit lines atomically. Requires X-Idempotency-Key header to prevent duplicate
+        posting.
+      parameters: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateJournalEntryDto'
+      responses:
+        '201':
+          description: Journal entry posted successfully
+      tags:
+        - ledger
+      security:
+        - api-key: []
+  /ledger/journal-entries/{journalId}:
+    get:
+      operationId: LedgerController_getJournal
+      summary: Get all lines of a journal entry
+      parameters:
+        - name: journalId
+          required: true
+          in: path
+          description: Journal UUID
+          schema:
+            type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/LedgerEntryResponseDto'
+      tags:
+        - ledger
+      security:
+        - api-key: []
+  /ledger/accounts/{accountId}/entries:
+    get:
+      operationId: LedgerController_getAccountEntries
+      summary: Get ledger entries for an account
+      parameters:
+        - name: accountId
+          required: true
+          in: path
+          description: Account UUID
+          schema:
+            type: string
+        - name: from
+          required: false
+          in: query
+          schema:
+            example: '2025-01-01'
+            type: string
+        - name: to
+          required: false
+          in: query
+          schema:
+            example: '2025-12-31'
+            type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/LedgerEntryResponseDto'
+      tags:
+        - ledger
+      security:
+        - api-key: []
+  /ledger/accounts/{accountId}/balance:
+    get:
+      operationId: LedgerController_getBalance
+      summary: Get derived balance for an account
+      parameters:
+        - name: accountId
+          required: true
+          in: path
+          description: Account UUID
+          schema:
+            type: string
+      responses:
+        '200':
+          description: ''
+      tags:
+        - ledger
+      security:
+        - api-key: []
+  /transactions:
+    post:
+      operationId: TransactionsController_process
+      summary: Process a transaction
+      description: >-
+        Routes to the correct handler based on transaction type. X-Idempotency-Key is required — duplicate requests with
+        the same key return the original response without reprocessing.
+      parameters:
+        - name: X-User-ID
+          in: header
+          description: The initiating user ID — used for audit trail
+          required: false
+          schema:
+            type: string
+        - name: X-Idempotency-Key
+          in: header
+          description: UUID v4 — required for all transaction requests
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTransactionDto'
+      responses:
+        '201':
+          description: Transaction processed successfully
+      tags:
+        - transactions
+      security:
+        - api-key: []
+  /fx/rates:
+    post:
+      operationId: FxController_ingestRate
+      summary: Ingest a new exchange rate snapshot
+      description: >-
+        Records a new rate and closes the previous active rate for the pair. Rates older than FX_RATE_MAX_AGE_MINUTES
+        are rejected at conversion time.
+      parameters: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateExchangeRateDto'
+      responses:
+        '201':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExchangeRateResponseDto'
+      tags:
+        - fx
+      security:
+        - api-key: []
+    get:
+      operationId: FxController_listRates
+      summary: List rate snapshots
+      parameters:
+        - name: base
+          required: false
+          in: query
+          schema:
+            type: string
+        - name: quote
+          required: false
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ExchangeRateResponseDto'
+      tags:
+        - fx
+      security:
+        - api-key: []
+  /fx/rates/current:
+    get:
+      operationId: FxController_getCurrent
+      summary: Get the current valid rate for a currency pair
+      parameters:
+        - name: base
+          required: true
+          in: query
+          schema:
+            example: USD
+            type: string
+        - name: quote
+          required: true
+          in: query
+          schema:
+            example: INR
+            type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExchangeRateResponseDto'
+      tags:
+        - fx
+      security:
+        - api-key: []
+  /fx/convert:
+    get:
+      operationId: FxController_preview
+      summary: Preview a conversion amount
+      description: Computes the converted amount without posting any journal entries.
+      parameters:
+        - name: base
+          required: true
+          in: query
+          schema:
+            example: USD
+            type: string
+        - name: quote
+          required: true
+          in: query
+          schema:
+            example: INR
+            type: string
+        - name: amount
+          required: true
+          in: query
+          schema:
+            example: '100.0000'
+            type: string
+      responses:
+        '200':
+          description: ''
+      tags:
+        - fx
+      security:
+        - api-key: []
+  /reports/trial-balance:
+    get:
+      operationId: ReportingController_trialBalance
+      summary: Trial balance as of any date
+      parameters:
+        - name: asOf
+          required: false
+          in: query
+          schema:
+            example: '2026-06-27T23:59:59Z'
+            type: string
+      responses:
+        '200':
+          description: ''
+      tags:
+        - reporting
+      security:
+        - api-key: []
+  /reports/accounts/{id}/statement:
+    get:
+      operationId: ReportingController_accountStatement
+      summary: Account statement with running balance
+      parameters:
+        - name: id
+          required: true
+          in: path
+          description: Account UUID
+          schema:
+            type: string
+        - name: from
+          required: false
+          in: query
+          schema:
+            type: string
+        - name: to
+          required: false
+          in: query
+          schema:
+            type: string
+        - name: page
+          required: false
+          in: query
+          schema:
+            example: '1'
+            type: string
+        - name: pageSize
+          required: false
+          in: query
+          schema:
+            example: '50'
+            type: string
+      responses:
+        '200':
+          description: ''
+      tags:
+        - reporting
+      security:
+        - api-key: []
+  /reports/income-statement:
+    get:
+      operationId: ReportingController_incomeStatement
+      summary: Income statement (P&L) for a period
+      parameters:
+        - name: from
+          required: false
+          in: query
+          schema:
+            type: string
+        - name: to
+          required: false
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: ''
+      tags:
+        - reporting
+      security:
+        - api-key: []
+  /reports/balance-sheet:
+    get:
+      operationId: ReportingController_balanceSheet
+      summary: Balance sheet — verifies A = L + E
+      description: isBalanced must always be true. Any discrepancy is a ledger integrity issue.
+      parameters:
+        - name: asOf
+          required: false
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: ''
+      tags:
+        - reporting
+      security:
+        - api-key: []
+  /reports/fx-exposure:
+    get:
+      operationId: ReportingController_fxExposure
+      summary: Foreign currency exposure with INR equivalents
+      parameters:
+        - name: asOf
+          required: false
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: ''
+      tags:
+        - reporting
+      security:
+        - api-key: []
+  /reports/reconciliation:
+    post:
+      operationId: ReportingController_reconciliation
+      summary: Reconcile ledger transactions against an external statement
+      description: >-
+        Compares internal ledger transactions within a date range against an external source (bank statement, payment
+        gateway settlement, NPCI UPI settlement file). Flags MATCHED, AMOUNT_MISMATCH, MISSING_IN_LEDGER (recorded
+        externally but not internally — higher risk), and MISSING_IN_EXTERNAL (recorded internally but not externally).
+        Addresses spec Case Study 1 (Paytm/NPCI reconciliation crisis).
+      parameters: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReconciliationRequestDto'
+      responses:
+        '201':
+          description: ''
+      tags:
+        - reporting
+      security:
+        - api-key: []
+  /audit/verify:
+    get:
+      operationId: AuditController_verify
+      summary: Verify hash chain integrity
+      description: >-
+        Traverses all POSTED ledger entries in insertion order and recomputes each SHA-256 hash. Any tampered entry
+        breaks the chain and is reported. Also runs anomaly detection (large round numbers, after-hours posting).
+      parameters:
+        - name: from
+          required: false
+          in: query
+          schema:
+            example: '2026-01-01T00:00:00Z'
+            type: string
+        - name: to
+          required: false
+          in: query
+          schema:
+            example: '2026-12-31T23:59:59Z'
+            type: string
+      responses:
+        '200':
+          description: Audit verification report
+      tags:
+        - audit
+      security:
+        - api-key: []
+  /audit/export:
+    get:
+      operationId: AuditController_export
+      summary: Export tamper-evident ledger package
+      description: >-
+        Returns a complete ledger export with chain verification results. Format suitable for regulatory submission
+        (RBI, FEMA, Big 4 auditors). Referenced in spec Case Studies 3 (Wirecard) and 5 (SVB).
+      parameters:
+        - name: from
+          required: true
+          in: query
+          schema:
+            example: '2026-01-01T00:00:00Z'
+            type: string
+        - name: to
+          required: true
+          in: query
+          schema:
+            example: '2026-12-31T23:59:59Z'
+            type: string
+      responses:
+        '200':
+          description: ''
+      tags:
+        - audit
+      security:
+        - api-key: []
+  /audit/anomalies:
+    get:
+      operationId: AuditController_anomalies
+      summary: Run anomaly detection only
+      description: Flags suspicious patterns without running full hash verification. Faster for operational monitoring.
+      parameters:
+        - name: from
+          required: false
+          in: query
+          schema:
+            type: string
+        - name: to
+          required: false
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: ''
+      tags:
+        - audit
+      security:
+        - api-key: []
+  /reversals/full:
+    post:
+      operationId: ReversalsController_fullReversal
+      summary: Full reversal of a transaction
+      description: >-
+        Creates an exact mirror of the original journal entry. The original entries are never modified (no-mutation
+        principle). Idempotent — duplicate requests with same key return original response.
+      parameters:
+        - name: X-Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FullReversalDto'
+      responses:
+        '201':
+          description: Reversal posted
+      tags:
+        - reversals
+      security:
+        - api-key: []
+  /reversals/partial:
+    post:
+      operationId: ReversalsController_partialRefund
+      summary: Partial refund with configurable fee policy
+      description: >-
+        Supports PROPORTIONAL, FULL, and NONE fee policies (spec A5.2). Cumulative refunds across multiple partial
+        refunds are validated against the original amount — cannot exceed original total.
+      parameters:
+        - name: X-Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PartialRefundDto'
+      responses:
+        '201':
+          description: Partial refund posted
+      tags:
+        - reversals
+      security:
+        - api-key: []
+info:
+  title: NovaPay Ledger System
+  description: |-
+    Double-Entry Accounting Ledger with Immutable Audit Trail — Zetheta BED-6C
+
+    Assessment: Ledger System with Double-Entry Accounting & Immutable Audit Trail
+    Intern ID: 493556B
+  version: 1.0.0
+  contact: {}
+tags:
+  - name: accounts
+    description: Chart of Accounts management
+  - name: transactions
+    description: Transaction processing engine — all 20 types
+  - name: ledger
+    description: Ledger entries and balance queries
+  - name: fx
+    description: Foreign exchange rate management
+  - name: reversals
+    description: Reversal and refund engine
+  - name: audit
+    description: Audit trail and hash chain verification
+  - name: reporting
+    description: Financial reports and statements
+  - name: health
+    description: System health and readiness checks
+servers: []
+components:
+  securitySchemes:
+    api-key:
+      type: apiKey
+      in: header
+      name: X-API-Key
+  schemas:
+    CreateAccountDto:
+      type: object
+      properties:
+        code:
+          type: string
+          example: '1099'
+          description: Unique account code. 1xxx=Asset, 2xxx=Liability, 3xxx=Equity, 4xxx=Revenue, 5xxx=Expense
+        name:
+          type: string
+          example: Customer Wallet – GBP Holdings
+        type:
+          type: string
+          enum:
+            - ASSET
+            - LIABILITY
+            - EQUITY
+            - REVENUE
+            - EXPENSE
+            - CONTRA_ASSET
+            - CONTRA_REVENUE
+        subType:
+          type: string
+          enum:
+            - CURRENT_ASSET
+            - NON_CURRENT_ASSET
+            - CURRENT_LIABILITY
+            - NON_CURRENT_LIABILITY
+            - RETAINED_EARNINGS
+            - SHARE_CAPITAL
+            - OPERATING_REVENUE
+            - NON_OPERATING_REVENUE
+            - OPERATING_EXPENSE
+            - MARKETING_EXPENSE
+            - FINANCIAL_EXPENSE
+            - FX_HOLDING
+        currency:
+          type: string
+          example: INR
+          description: ISO 4217 currency code
+        description:
+          type: string
+          example: GBP wallet for UK customers
+        parentId:
+          type: string
+          description: Parent account UUID for hierarchical CoA
+      required:
+        - code
+        - name
+        - type
+        - subType
+        - currency
+    AccountResponseDto:
+      type: object
+      properties:
+        id:
+          type: string
+        code:
+          type: string
+        name:
+          type: string
+        type:
+          type: string
+        subType:
+          type: string
+        currency:
+          type: string
+        status:
+          type: string
+        parentId:
+          type: object
+        description:
+          type: object
+        createdAt:
+          type: string
+        updatedAt:
+          type: string
+      required:
+        - id
+        - code
+        - name
+        - type
+        - subType
+        - currency
+        - status
+        - createdAt
+        - updatedAt
+    JournalLineDto:
+      type: object
+      properties:
+        accountId:
+          type: string
+          description: Account UUID to post this line to
+        entryType:
+          type: string
+          enum:
+            - DEBIT
+            - CREDIT
+        amount:
+          type: string
+          description: Amount as a string — never pass a float. e.g. "5000.0000"
+          example: '5000.0000'
+        currency:
+          type: string
+          example: INR
+        narrative:
+          type: string
+          example: Customer deposit via NEFT
+      required:
+        - accountId
+        - entryType
+        - amount
+        - currency
+        - narrative
+    CreateJournalEntryDto:
+      type: object
+      properties:
+        referenceType:
+          type: string
+          enum:
+            - CUSTOMER_DEPOSIT_BANK
+            - CUSTOMER_DEPOSIT_CARD
+            - CUSTOMER_WITHDRAWAL_BANK
+            - P2P_TRANSFER
+            - MERCHANT_PAYMENT_QR
+            - MERCHANT_PAYMENT_ONLINE
+            - BILL_PAYMENT
+            - INTEREST_ACCRUAL
+            - INTEREST_PAYOUT
+            - FEE_DEDUCTION_MONTHLY
+            - CASHBACK_CREDIT
+            - PROMOTIONAL_CREDIT
+            - LOAN_DISBURSEMENT
+            - LOAN_EMI_PAYMENT
+            - FX_CONVERSION
+            - REFUND_FULL
+            - REFUND_PARTIAL
+            - CHARGEBACK
+            - REWARD_REDEMPTION
+            - ACCOUNT_CLOSURE_SWEEP
+        referenceId:
+          type: string
+          description: UUID of the originating transaction
+        effectiveDate:
+          type: string
+          description: Economic effective date (ISO 8601)
+        lines:
+          minItems: 2
+          type: array
+          items:
+            $ref: '#/components/schemas/JournalLineDto'
+        metadata:
+          type: object
+          description: 'Additional context: IP, deviceId, etc.'
+      required:
+        - referenceType
+        - referenceId
+        - effectiveDate
+        - lines
+    LedgerEntryResponseDto:
+      type: object
+      properties:
+        id:
+          type: string
+        journalId:
+          type: string
+        accountId:
+          type: string
+        entryType:
+          type: string
+        amount:
+          type: string
+        currency:
+          type: string
+        status:
+          type: string
+        effectiveDate:
+          type: string
+        postedAt:
+          type: object
+        createdBy:
+          type: string
+        referenceType:
+          type: string
+        referenceId:
+          type: string
+        narrative:
+          type: string
+        hash:
+          type: string
+        previousHash:
+          type: string
+        metadata:
+          type: object
+      required:
+        - id
+        - journalId
+        - accountId
+        - entryType
+        - amount
+        - currency
+        - status
+        - effectiveDate
+        - createdBy
+        - referenceType
+        - referenceId
+        - narrative
+        - hash
+        - previousHash
+    CreateTransactionDto:
+      type: object
+      properties:
+        type:
+          type: string
+          enum:
+            - CUSTOMER_DEPOSIT_BANK
+            - CUSTOMER_DEPOSIT_CARD
+            - CUSTOMER_WITHDRAWAL_BANK
+            - P2P_TRANSFER
+            - MERCHANT_PAYMENT_QR
+            - MERCHANT_PAYMENT_ONLINE
+            - BILL_PAYMENT
+            - INTEREST_ACCRUAL
+            - INTEREST_PAYOUT
+            - FEE_DEDUCTION_MONTHLY
+            - CASHBACK_CREDIT
+            - PROMOTIONAL_CREDIT
+            - LOAN_DISBURSEMENT
+            - LOAN_EMI_PAYMENT
+            - FX_CONVERSION
+            - REFUND_FULL
+            - REFUND_PARTIAL
+            - CHARGEBACK
+            - REWARD_REDEMPTION
+            - ACCOUNT_CLOSURE_SWEEP
+        effectiveDate:
+          type: string
+          description: ISO 8601 effective date
+          example: '2026-06-26T00:00:00Z'
+        payload:
+          type: object
+          description: Transaction-type-specific payload. See handler documentation for required fields per type.
+          example:
+            amount: '5000.0000'
+            currency: INR
+            walletAccountId: uuid-here
+            liabilityAccountId: uuid-here
+        note:
+          type: string
+      required:
+        - type
+        - effectiveDate
+        - payload
+    CreateExchangeRateDto:
+      type: object
+      properties:
+        baseCurrency:
+          type: string
+          example: USD
+          description: ISO 4217 base currency
+        quoteCurrency:
+          type: string
+          example: INR
+          description: ISO 4217 quote currency
+        rate:
+          type: string
+          example: '83.42150000'
+          description: 1 base = rate quote — must be a NUMERIC string
+        source:
+          type: string
+          example: RBI_REFERENCE
+          description: 'Rate provider: RBI_REFERENCE | OPEN_EXCHANGE_RATES | INTERNAL'
+        validFrom:
+          type: string
+          example: '2026-06-26T09:00:00Z'
+        validUntil:
+          type: string
+          example: '2026-06-26T10:00:00Z'
+      required:
+        - baseCurrency
+        - quoteCurrency
+        - rate
+        - source
+        - validFrom
+    ExchangeRateResponseDto:
+      type: object
+      properties:
+        snapshotId:
+          type: string
+        baseCurrency:
+          type: string
+        quoteCurrency:
+          type: string
+        rate:
+          type: string
+        inverseRate:
+          type: string
+        source:
+          type: string
+        capturedAt:
+          type: string
+        validFrom:
+          type: string
+        validUntil:
+          type: object
+      required:
+        - snapshotId
+        - baseCurrency
+        - quoteCurrency
+        - rate
+        - inverseRate
+        - source
+        - capturedAt
+        - validFrom
+    ExternalStatementLineDto:
+      type: object
+      properties:
+        externalReference:
+          type: string
+          description: >-
+            The external system's reference for this transaction. Expected to correspond to our internal
+            transaction/reference ID (referenceId on the ledger entry) — in a real integration this mapping is usually
+            established via a shared idempotency key, UTR, or ARN.
+          example: 019f272c-667a-7ee5-a6ca-a777a655b97e
+        amount:
+          type: string
+          example: '5000.0000'
+        currency:
+          type: string
+          example: INR
+        date:
+          type: string
+          example: '2026-06-27T00:00:00Z'
+      required:
+        - externalReference
+        - amount
+        - currency
+        - date
+    ReconciliationRequestDto:
+      type: object
+      properties:
+        from:
+          type: string
+          example: '2026-06-01T00:00:00Z'
+        to:
+          type: string
+          example: '2026-06-30T23:59:59Z'
+        externalStatement:
+          minItems: 1
+          type: array
+          items:
+            $ref: '#/components/schemas/ExternalStatementLineDto'
+      required:
+        - from
+        - to
+        - externalStatement
+    FullReversalDto:
+      type: object
+      properties:
+        originalTransactionId:
+          type: string
+          description: UUID of the original transaction to reverse
+        reason:
+          type: string
+          example: Customer dispute — item not received
+      required:
+        - originalTransactionId
+        - reason
+    PartialRefundDto:
+      type: object
+      properties:
+        originalTransactionId:
+          type: string
+          description: UUID of the original transaction
+        refundAmount:
+          type: string
+          example: '500.0000'
+          description: Amount to refund — must not exceed original amount
+        feePolicy:
+          type: string
+          enum:
+            - PROPORTIONAL
+            - FULL
+            - NONE
+        reason:
+          type: string
+          example: Partial return — 1 of 2 items returned
+        originalFeeAmount:
+          type: string
+          description: Override original fee amount if known
+      required:
+        - originalTransactionId
+        - refundAmount
+        - feePolicy
+        - reason

@@ -173,3 +173,8 @@ See `docs/submission-notes.md` for a full analysis of the four deliberate errors
 - PSD2: full audit trail with cryptographic integrity proof
 - FEMA: LRS quota tracking on international transfers (metadata)
 - IndAS 21: FX revaluation batch job scaffold (unrealised P&L)
+
+## Documentation Artifacts
+
+- **OpenAPI Specification**: `docs/api/openapi.yaml` — regenerate with `npm run docs:openapi`
+- **Entity Relationship Diagram**: `docs/schema/erd.dbml` (source) and `docs/schema/erd-diagram.png` (rendered) — view/edit at [dbdiagram.io](https://dbdiagram.io)

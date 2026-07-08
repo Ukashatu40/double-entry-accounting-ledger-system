@@ -1,0 +1,343 @@
+// docs/schema/erd.dbml
+// NovaPay Ledger System — Entity Relationship Diagram
+// Paste this file's contents into https://dbdiagram.io to render and export PNG.
+// Mirrors prisma/schema.prisma exactly as of BED-6C submission.
+
+Project NovaPayLedger {
+  database_type: 'PostgreSQL'
+  Note: 'Double-Entry Accounting Ledger with Immutable Audit Trail — Zetheta BED-6C'
+}
+
+//////////////////////////////////////////////////////////////
+// CHART OF ACCOUNTS
+//////////////////////////////////////////////////////////////
+
+Table accounts {
+  id           uuid       [pk, default: `gen_random_uuid()`]
+  code         varchar(20) [unique, not null, note: '1xxx=Asset, 2xxx=Liability, 3xxx=Equity, 4xxx=Revenue, 5xxx=Expense, 9xxx=System']
+  name         varchar(255) [not null]
+  type         account_type [not null]
+  sub_type     account_sub_type [not null]
+  currency     char(3)    [not null, note: 'ISO 4217']
+  status       account_status [not null, default: 'ACTIVE']
+  parent_id    uuid       [ref: > accounts.id, note: 'Hierarchical CoA support']
+  description  text
+  metadata     jsonb
+  created_at   timestamptz [not null, default: `now()`]
+  updated_at   timestamptz [not null]
+
+  indexes {
+    type
+    currency
+    status
+    parent_id
+  }
+
+  Note: 'Never stores balance directly — always derived from SUM(ledger_entries)'
+}
+
+//////////////////////////////////////////////////////////////
+// LEDGER — the immutable core
+//////////////////////////////////////////////////////////////
+
+Table ledger_entries {
+  id              uuid        [not null, note: 'UUID v7, time-sortable']
+  journal_id      uuid        [not null, note: 'Groups debit/credit lines of one financial event']
+  account_id      uuid        [ref: > accounts.id, not null]
+  entry_type      entry_type  [not null, note: 'DEBIT | CREDIT']
+  amount          "numeric(19,4)" [not null, note: 'Never FLOAT/DOUBLE']
+  currency        char(3)     [not null]
+  status          entry_status [not null, default: 'PENDING']
+  effective_date  timestamptz [not null, note: 'PARTITION KEY — range partitioned by month']
+  posted_at       timestamptz
+  created_by      varchar(255) [not null]
+  idempotency_key varchar(128)
+  reference_type  transaction_type [not null]
+  reference_id    uuid        [not null]
+  narrative       text        [not null]
+  hash            char(64)    [not null, note: 'SHA-256 of own data + previous_hash']
+  previous_hash   char(64)    [not null, note: 'Forms the cryptographic audit chain']
+  metadata        jsonb
+
+  indexes {
+    (id, effective_date) [pk]
+    journal_id
+    account_id
+    reference_id
+    reference_type
+    status
+    currency
+    created_by
+    posted_at
+    (account_id, effective_date) [note: 'Primary access pattern for statements']
+  }
+
+  Note: '''
+    IMMUTABLE: BEFORE UPDATE/DELETE triggers block all mutation except
+    PENDING→POSTED and POSTED→REVERSED status transitions.
+    Native PostgreSQL range partitioning by effective_date (monthly).
+  '''
+}
+
+Table balance_snapshots {
+  id           uuid        [pk, default: `gen_random_uuid()`]
+  account_id   uuid        [ref: > accounts.id, not null]
+  balance      "numeric(19,4)" [not null]
+  currency     char(3)     [not null]
+  snapshot_at  timestamptz [not null]
+  triggered_by uuid        [not null, note: 'The ledger_entry id that caused this snapshot']
+  created_at   timestamptz [not null, default: `now()`]
+
+  indexes {
+    account_id
+    (account_id, snapshot_at)
+  }
+
+  Note: 'Read-optimised cache only — NEVER the source of truth for write decisions'
+}
+
+//////////////////////////////////////////////////////////////
+// FX ENGINE
+//////////////////////////////////////////////////////////////
+
+Table exchange_rate_snapshots {
+  id             uuid        [pk, default: `gen_random_uuid()`]
+  base_currency  char(3)     [not null]
+  quote_currency char(3)     [not null]
+  rate           "numeric(18,8)" [not null]
+  inverse_rate   "numeric(18,8)" [not null]
+  source         varchar(50) [not null, note: 'RBI_REFERENCE | OPEN_EXCHANGE_RATES | INTERNAL']
+  captured_at    timestamptz [not null]
+  valid_from     timestamptz [not null]
+  valid_until    timestamptz [note: 'NULL = currently active']
+  created_at     timestamptz [not null, default: `now()`]
+
+  indexes {
+    (base_currency, quote_currency)
+    valid_from
+    valid_until
+    (base_currency, quote_currency, valid_from, valid_until)
+  }
+
+  Note: '''
+    IMMUTABLE: rates never updated except setting valid_until to close
+    a superseded rate. Stale-rate rejection enforced at query time
+    (FX_RATE_MAX_AGE_MINUTES) — Incident Day 6 fix.
+  '''
+}
+
+//////////////////////////////////////////////////////////////
+// IDEMPOTENCY
+//////////////////////////////////////////////////////////////
+
+Table idempotency_keys {
+  id              uuid        [pk, default: `gen_random_uuid()`]
+  key             varchar(128) [not null]
+  user_id         varchar(255) [not null]
+  endpoint        varchar(255) [not null]
+  request_hash    char(64)    [not null, note: 'SHA-256 of request body — detects key reuse w/ different body']
+  status          idempotency_status [not null, default: 'PROCESSING']
+  response_status int
+  response_body   jsonb
+  transaction_id  uuid
+  created_at      timestamptz [not null, default: `now()`]
+  expires_at      timestamptz [not null]
+
+  indexes {
+    (key, user_id) [unique]
+    expires_at
+    status
+  }
+}
+
+//////////////////////////////////////////////////////////////
+// TRANSACTIONS
+//////////////////////////////////////////////////////////////
+
+Table transactions {
+  id              uuid        [pk, default: `gen_random_uuid()`]
+  type            transaction_type [not null]
+  status          transaction_status [not null, default: 'INITIATED']
+  amount          "numeric(19,4)" [not null]
+  currency        char(3)     [not null]
+  initiated_by    varchar(255) [not null]
+  idempotency_key varchar(128)
+  original_id     uuid        [ref: > transactions.id, note: 'Self-reference for reversals']
+  exchange_rate_id uuid
+  failure_reason  text
+  metadata        jsonb
+  created_at      timestamptz [not null, default: `now()`]
+  updated_at      timestamptz [not null]
+  posted_at       timestamptz
+
+  indexes {
+    type
+    status
+    initiated_by
+    original_id
+    created_at
+  }
+}
+
+Table transaction_limits {
+  id               uuid        [pk, default: `gen_random_uuid()`]
+  account_id       uuid        [ref: > accounts.id, not null]
+  transaction_type transaction_type [not null]
+  max_per_tx       "numeric(19,4)"
+  max_per_day      "numeric(19,4)"
+  max_per_month    "numeric(19,4)"
+  currency         char(3)     [not null]
+  is_active        boolean     [not null, default: true]
+  created_at       timestamptz [not null, default: `now()`]
+  updated_at       timestamptz [not null]
+
+  indexes {
+    (account_id, transaction_type) [unique]
+    account_id
+  }
+}
+
+//////////////////////////////////////////////////////////////
+// REVERSALS
+//////////////////////////////////////////////////////////////
+
+Table reversals {
+  id                       uuid        [pk, default: `gen_random_uuid()`]
+  original_transaction_id  uuid        [not null]
+  reversal_transaction_id  uuid        [not null]
+  amount                   "numeric(19,4)" [not null]
+  currency                 char(3)     [not null]
+  fee_policy               refund_fee_policy [not null, note: 'PROPORTIONAL | FULL | NONE']
+  fee_amount_reversed      "numeric(19,4)" [not null, default: 0]
+  reason                   text        [not null]
+  initiated_by             varchar(255) [not null]
+  idempotency_key          varchar(128) [not null]
+  created_at               timestamptz [not null, default: `now()`]
+
+  indexes {
+    (original_transaction_id, idempotency_key) [unique, note: 'Prevents duplicate reversals on retry']
+    original_transaction_id
+    reversal_transaction_id
+  }
+
+  Note: 'No-mutation principle: reversals create NEW offsetting entries, never touch originals'
+}
+
+//////////////////////////////////////////////////////////////
+// AUDIT
+//////////////////////////////////////////////////////////////
+
+Table audit_events {
+  id          uuid        [pk, default: `gen_random_uuid()`]
+  actor       varchar(255) [not null]
+  action      varchar(100) [not null]
+  entity_type varchar(100) [not null]
+  entity_id   uuid        [not null]
+  before      jsonb
+  after       jsonb
+  ip_address  varchar(45)
+  user_agent  text
+  request_id  varchar(128)
+  created_at  timestamptz [not null, default: `now()`]
+
+  indexes {
+    actor
+    action
+    (entity_type, entity_id)
+    created_at
+  }
+
+  Note: 'Application-level audit log — separate from the ledger hash chain'
+}
+
+//////////////////////////////////////////////////////////////
+// ENUMS
+//////////////////////////////////////////////////////////////
+
+Enum account_type {
+  ASSET
+  LIABILITY
+  EQUITY
+  REVENUE
+  EXPENSE
+  CONTRA_ASSET
+  CONTRA_REVENUE
+}
+
+Enum account_sub_type {
+  CURRENT_ASSET
+  NON_CURRENT_ASSET
+  CURRENT_LIABILITY
+  NON_CURRENT_LIABILITY
+  RETAINED_EARNINGS
+  SHARE_CAPITAL
+  OPERATING_REVENUE
+  NON_OPERATING_REVENUE
+  OPERATING_EXPENSE
+  MARKETING_EXPENSE
+  FINANCIAL_EXPENSE
+  FX_HOLDING
+}
+
+Enum account_status {
+  ACTIVE
+  INACTIVE
+  CLOSED
+  SUSPENDED
+}
+
+Enum entry_type {
+  DEBIT
+  CREDIT
+}
+
+Enum entry_status {
+  PENDING
+  POSTED
+  REVERSED
+}
+
+Enum transaction_type {
+  CUSTOMER_DEPOSIT_BANK
+  CUSTOMER_DEPOSIT_CARD
+  CUSTOMER_WITHDRAWAL_BANK
+  P2P_TRANSFER
+  MERCHANT_PAYMENT_QR
+  MERCHANT_PAYMENT_ONLINE
+  BILL_PAYMENT
+  INTEREST_ACCRUAL
+  INTEREST_PAYOUT
+  FEE_DEDUCTION_MONTHLY
+  CASHBACK_CREDIT
+  PROMOTIONAL_CREDIT
+  LOAN_DISBURSEMENT
+  LOAN_EMI_PAYMENT
+  FX_CONVERSION
+  REFUND_FULL
+  REFUND_PARTIAL
+  CHARGEBACK
+  REWARD_REDEMPTION
+  ACCOUNT_CLOSURE_SWEEP
+}
+
+Enum transaction_status {
+  INITIATED
+  PROCESSING
+  POSTED
+  FAILED
+  REJECTED
+  REVERSAL_PENDING
+  REVERSED
+}
+
+Enum idempotency_status {
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+Enum refund_fee_policy {
+  PROPORTIONAL
+  FULL
+  NONE
+}
