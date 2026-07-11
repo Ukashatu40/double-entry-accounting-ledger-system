@@ -1,7 +1,7 @@
 // src/transactions/handlers/fee-deduction.handler.ts
 import { Injectable, UnprocessableEntityException } from '@nestjs/common';
 import { BaseTransactionHandler } from './base-transaction.handler';
-// import { computeBalancingLeg } from './balancing-leg.util';
+import { computeBalancingLeg } from './balancing-leg.util';
 import type { Account } from '@prisma/client';
 import type { CreateJournalEntryDto } from '@ledger/dto/create-journal-entry.dto';
 
@@ -45,6 +45,10 @@ export class FeeDeductionHandler extends BaseTransactionHandler {
     return Promise.resolve();
   }
 
+  protected requiresPlatformOperatingCash(): boolean {
+    return true;
+  }
+
   protected buildJournalEntry(
     transactionId: string,
     payload: Record<string, unknown>,
@@ -52,31 +56,48 @@ export class FeeDeductionHandler extends BaseTransactionHandler {
   ): CreateJournalEntryDto {
     const wallet = this.requireAccount(accounts, 'wallet');
     const feeRevenue = this.requireAccount(accounts, 'feeRevenue');
+    const platformCash = this.requireAccount(accounts, 'platformOperatingCash');
     const amount = String(payload['amount'] ?? '');
     const currency = String(payload['currency'] ?? 'INR');
     const effectiveDate = String(payload['effectiveDate'] ?? new Date().toISOString());
     const feeType = String(payload['feeType'] ?? 'Monthly Maintenance Fee');
 
+    const realLines = [
+      {
+        accountId: wallet.id,
+        entryType: 'CREDIT' as const,
+        amount,
+        currency,
+        narrative: `${feeType} deducted`,
+      },
+      {
+        accountId: feeRevenue.id,
+        entryType: 'CREDIT' as const,
+        amount,
+        currency,
+        narrative: `${feeType} revenue`,
+      },
+    ];
+
+    const plug = computeBalancingLeg(realLines);
+    const lines = plug
+      ? [
+          ...realLines,
+          {
+            accountId: platformCash.id,
+            entryType: plug.entryType,
+            amount: plug.amount,
+            currency,
+            narrative: `${feeType} — balancing leg (see ADR-007)`,
+          },
+        ]
+      : realLines;
+
     return {
       referenceType: 'FEE_DEDUCTION_MONTHLY',
       referenceId: transactionId,
       effectiveDate,
-      lines: [
-        {
-          accountId: wallet.id,
-          entryType: 'DEBIT',
-          amount,
-          currency,
-          narrative: `${feeType} deducted`,
-        },
-        {
-          accountId: feeRevenue.id,
-          entryType: 'CREDIT',
-          amount,
-          currency,
-          narrative: `${feeType} revenue`,
-        },
-      ],
+      lines,
     };
   }
 

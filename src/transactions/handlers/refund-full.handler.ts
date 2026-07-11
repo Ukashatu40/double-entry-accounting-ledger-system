@@ -1,6 +1,7 @@
 // src/transactions/handlers/refund-full.handler.ts
 import { Injectable, UnprocessableEntityException } from '@nestjs/common';
 import { BaseTransactionHandler } from './base-transaction.handler';
+import { computeBalancingLeg } from './balancing-leg.util';
 import type { Account } from '@prisma/client';
 import type { CreateJournalEntryDto } from '@ledger/dto/create-journal-entry.dto';
 
@@ -8,20 +9,28 @@ import type { CreateJournalEntryDto } from '@ledger/dto/create-journal-entry.dto
  * Transaction Type #16 — Full Refund
  *
  * No-mutation principle (spec A5.1): we never modify the original entry.
- * A full reversal creates an exact mirror of the original journal entry.
+ * A full reversal creates an exact mirror of the original journal entry —
+ * every DEBIT becomes a CREDIT and every CREDIT becomes a DEBIT, for the
+ * same amounts. Given the (corrected) merchant-payment origination entry:
+ *   CREDIT wallet (amount+fee) / DEBIT merchant (amount) / CREDIT feeRevenue (fee)
+ * the mirror is:
+ *   DEBIT  1001  Customer Wallet                [amount + fee]  (Asset increase — refunded)
+ *   CREDIT 1010  Merchant Settlement – Pending  [amount]        (Asset decrease — settlement reversed)
+ *   DEBIT  4001  Transaction Fee Revenue         [fee]          (Revenue decrease — fee reversed)
+ *   CREDIT 1050  Platform Operating Cash         [plug — mirrors origination's plug]
  *
- * Journal pattern:
- *   DEBIT  1010  Merchant Settlement – Pending  [original amount]
- *   CREDIT 1001  Customer Wallet                [original amount]
- *
- * For the full refund the fee is also reversed:
- *   DEBIT  4001  Transaction Fee Revenue         [original fee]
- *   CREDIT 1001  Customer Wallet                [original fee]
+ * NOTE on prior bug: merchant and wallet legs were backwards (matching the
+ * original merchant-payment-qr bug's mirror image) — see
+ * docs/architecture/ADR-007-platform-operating-cash.md.
  *
  * No balance check — this credits the customer wallet.
  */
 @Injectable()
 export class RefundFullHandler extends BaseTransactionHandler {
+  protected requiresPlatformOperatingCash(): boolean {
+    return true;
+  }
+
   protected validateBusinessRules(
     payload: Record<string, unknown>,
     accounts: Record<string, Account>,
@@ -53,6 +62,7 @@ export class RefundFullHandler extends BaseTransactionHandler {
     const merchantSettlement = this.requireAccount(accounts, 'merchantSettlement');
     const wallet = this.requireAccount(accounts, 'wallet');
     const feeRevenue = this.requireAccount(accounts, 'feeRevenue');
+    const platformCash = this.requireAccount(accounts, 'platformOperatingCash');
 
     const amount = String(payload['amount'] ?? '');
     const fee = String(payload['feeAmount'] ?? '0.0000');
@@ -63,33 +73,49 @@ export class RefundFullHandler extends BaseTransactionHandler {
 
     const totalRefund = (parseFloat(amount) + parseFloat(fee)).toFixed(4);
 
+    const realLines = [
+      {
+        accountId: wallet.id,
+        entryType: 'DEBIT' as const,
+        amount: totalRefund,
+        currency,
+        narrative: `Full refund credited — ${reason}`,
+      },
+      {
+        accountId: merchantSettlement.id,
+        entryType: 'CREDIT' as const,
+        amount,
+        currency,
+        narrative: `Full refund — reversal of ${originalRef}: ${reason}`,
+      },
+      {
+        accountId: feeRevenue.id,
+        entryType: 'DEBIT' as const,
+        amount: fee,
+        currency,
+        narrative: `Fee reversal on full refund of ${originalRef}`,
+      },
+    ];
+
+    const plug = computeBalancingLeg(realLines);
+    const lines = plug
+      ? [
+          ...realLines,
+          {
+            accountId: platformCash.id,
+            entryType: plug.entryType,
+            amount: plug.amount,
+            currency,
+            narrative: `Full refund — balancing leg (see ADR-007)`,
+          },
+        ]
+      : realLines;
+
     return {
       referenceType: 'REFUND_FULL',
       referenceId: transactionId,
       effectiveDate,
-      lines: [
-        {
-          accountId: merchantSettlement.id,
-          entryType: 'DEBIT',
-          amount,
-          currency,
-          narrative: `Full refund — reversal of ${originalRef}: ${reason}`,
-        },
-        {
-          accountId: feeRevenue.id,
-          entryType: 'DEBIT',
-          amount: fee,
-          currency,
-          narrative: `Fee reversal on full refund of ${originalRef}`,
-        },
-        {
-          accountId: wallet.id,
-          entryType: 'CREDIT',
-          amount: totalRefund,
-          currency,
-          narrative: `Full refund credited — ${reason}`,
-        },
-      ],
+      lines,
     };
   }
 

@@ -2,6 +2,7 @@
 import { Injectable, UnprocessableEntityException } from '@nestjs/common';
 import Decimal from 'decimal.js';
 import { BaseTransactionHandler } from './base-transaction.handler';
+import { computeBalancingLeg } from './balancing-leg.util';
 import type { Account } from '@prisma/client';
 import type { CreateJournalEntryDto } from '@ledger/dto/create-journal-entry.dto';
 
@@ -13,13 +14,22 @@ import type { CreateJournalEntryDto } from '@ledger/dto/create-journal-entry.dto
  *   FULL         — entire fee refunded regardless of partial amount
  *   NONE         — fee retained, customer gets only the partial amount
  *
- * Journal pattern (PROPORTIONAL example):
- *   DEBIT  1010  Merchant Settlement – Pending  [partial amount]
- *   DEBIT  4001  Transaction Fee Revenue         [proportional fee refund]
- *   CREDIT 1001  Customer Wallet                [partial amount + fee refund]
+ * Correct journal pattern (Table A1.1 + ADR-007, PROPORTIONAL example):
+ *   DEBIT  1001  Customer Wallet                [partial amount + fee refund]  (Asset increase)
+ *   CREDIT 1010  Merchant Settlement – Pending  [partial amount]                (Asset decrease)
+ *   DEBIT  4001  Transaction Fee Revenue         [proportional fee refund]      (Revenue decrease)
+ *   CREDIT 1050  Platform Operating Cash         [plug — see balancing-leg.util.ts]
+ *
+ * NOTE on prior bug: merchant and wallet legs were backwards — same
+ * pattern as refund-full. See
+ * docs/architecture/ADR-007-platform-operating-cash.md.
  */
 @Injectable()
 export class RefundPartialHandler extends BaseTransactionHandler {
+  protected requiresPlatformOperatingCash(): boolean {
+    return true;
+  }
+
   protected validateBusinessRules(
     payload: Record<string, unknown>,
     _accounts: Record<string, Account>,
@@ -56,6 +66,7 @@ export class RefundPartialHandler extends BaseTransactionHandler {
     const merchantSettlement = this.requireAccount(accounts, 'merchantSettlement');
     const wallet = this.requireAccount(accounts, 'wallet');
     const feeRevenue = this.requireAccount(accounts, 'feeRevenue');
+    const platformCash = this.requireAccount(accounts, 'platformOperatingCash');
 
     const refundAmount = new Decimal(String(payload['refundAmount'] ?? '0'));
     const originalAmount = new Decimal(String(payload['originalAmount'] ?? '0'));
@@ -82,26 +93,32 @@ export class RefundPartialHandler extends BaseTransactionHandler {
     }
 
     const totalCredit = refundAmount.plus(feeRefund);
-    const lines: CreateJournalEntryDto['lines'] = [
-      {
-        accountId: merchantSettlement.id,
-        entryType: 'DEBIT',
-        amount: refundAmount.toFixed(4),
-        currency,
-        narrative: `Partial refund (${policy} fee policy) — ref:${originalRef}: ${reason}`,
-      },
+    const realLines: Array<{
+      accountId: string;
+      entryType: 'DEBIT' | 'CREDIT';
+      amount: string;
+      currency: string;
+      narrative: string;
+    }> = [
       {
         accountId: wallet.id,
-        entryType: 'CREDIT',
+        entryType: 'DEBIT',
         amount: totalCredit.toFixed(4),
         currency,
         narrative: `Partial refund credited — ${reason}`,
+      },
+      {
+        accountId: merchantSettlement.id,
+        entryType: 'CREDIT',
+        amount: refundAmount.toFixed(4),
+        currency,
+        narrative: `Partial refund (${policy} fee policy) — ref:${originalRef}: ${reason}`,
       },
     ];
 
     // Only add fee reversal line if fee is actually being refunded
     if (feeRefund.gt(0)) {
-      lines.splice(1, 0, {
+      realLines.push({
         accountId: feeRevenue.id,
         entryType: 'DEBIT',
         amount: feeRefund.toFixed(4),
@@ -109,6 +126,20 @@ export class RefundPartialHandler extends BaseTransactionHandler {
         narrative: `Fee reversal — ${policy} policy on partial refund`,
       });
     }
+
+    const plug = computeBalancingLeg(realLines);
+    const lines = plug
+      ? [
+          ...realLines,
+          {
+            accountId: platformCash.id,
+            entryType: plug.entryType,
+            amount: plug.amount,
+            currency,
+            narrative: `Partial refund — balancing leg (see ADR-007)`,
+          },
+        ]
+      : realLines;
 
     return {
       referenceType: 'REFUND_PARTIAL',
