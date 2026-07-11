@@ -44,13 +44,23 @@ docker compose up postgres -d
 npx prisma migrate deploy
 npm run db:seed
 
-# 5. Apply immutability triggers
+# 5. Apply immutability triggers, table partitioning, and the Platform
+#    Operating Cash system account (see docs/architecture/ADR-007)
 docker exec -i ledger_postgres psql -U ledger_user -d ledger_db \
   < database/triggers/003_immutability_triggers.sql
+docker exec -i ledger_postgres psql -U ledger_user -d ledger_db \
+  < database/triggers/008_partition_ledger_entries.sql
+docker exec -i ledger_postgres psql -U ledger_user -d ledger_db \
+  < database/triggers/010_add_platform_operating_cash_account.sql
 
 # 6. Start the API
 npm run start:dev
 ```
+
+> Steps 4–5 are intentionally separate from `docker compose up` (rather than
+> baked into a container entrypoint) so each migration's effect is visible
+> and inspectable during setup — see `docs/architecture/ADR-006-migration-strategy.md`.
+> Re-running any of the SQL files above is safe; each is idempotent.
 
 **API:** `http://localhost:3000/api/v1`  
 **Swagger UI:** `http://localhost:3000/api/v1/docs`  
