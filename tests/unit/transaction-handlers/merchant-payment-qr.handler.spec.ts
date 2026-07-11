@@ -1,6 +1,7 @@
 // tests/unit/transaction-handlers/merchant-payment-qr.handler.spec.ts
 import { MerchantPaymentQrHandler } from '@transactions/handlers/merchant-payment-qr.handler';
 import type { Account } from '@prisma/client';
+import { assertJournalBalanced, assertAssetAccountMoves } from './journal-entry-assertions.util';
 
 function makeAccount(overrides: Partial<Account> = {}): Account {
   return {
@@ -25,7 +26,8 @@ describe('MerchantPaymentQrHandler', () => {
   const accounts = {
     wallet: makeAccount({ id: 'wallet-id' }),
     merchant: makeAccount({ id: 'merchant-id' }),
-    feeRevenue: makeAccount({ id: 'fee-id' }),
+    feeRevenue: makeAccount({ id: 'fee-id', type: 'REVENUE' }),
+    platformOperatingCash: makeAccount({ id: 'platform-id' }),
   };
 
   beforeEach(() => {
@@ -80,5 +82,36 @@ describe('MerchantPaymentQrHandler', () => {
 
     const feeLine = dto.lines.find((l) => l.accountId === 'fee-id');
     expect(feeLine?.amount).toBe('1.0000'); // 10 * 0.005 = 0.05, floored to MIN_FEE 1.0000
+  });
+
+  describe('buildJournalEntry — balance and direction', () => {
+    function build(payload: Record<string, unknown>) {
+      return (
+        handler as unknown as {
+          buildJournalEntry: (
+            id: string,
+            p: Record<string, unknown>,
+            a: Record<string, Account>,
+          ) => {
+            lines: Array<{ accountId: string; entryType: 'DEBIT' | 'CREDIT'; amount: string }>;
+          };
+        }
+      ).buildJournalEntry('txn-1', payload, accounts);
+    }
+
+    it('produces a fully balanced journal entry', () => {
+      const dto = build({ amount: '1000.0000', currency: 'INR' });
+      assertJournalBalanced(dto.lines);
+    });
+
+    it('DECREASES the customer wallet balance (regression test for the fixed polarity bug)', () => {
+      const dto = build({ amount: '1000.0000', currency: 'INR' });
+      assertAssetAccountMoves(dto.lines, 'wallet-id', 'decrease');
+    });
+
+    it('INCREASES the merchant settlement balance', () => {
+      const dto = build({ amount: '1000.0000', currency: 'INR' });
+      assertAssetAccountMoves(dto.lines, 'merchant-id', 'increase');
+    });
   });
 });

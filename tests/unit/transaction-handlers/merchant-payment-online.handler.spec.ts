@@ -1,5 +1,6 @@
 import { MerchantPaymentOnlineHandler } from '@transactions/handlers/merchant-payment-online.handler';
 import type { Account } from '@prisma/client';
+import { assertJournalBalanced, assertAssetAccountMoves } from './journal-entry-assertions.util';
 
 function makeAccount(overrides: Partial<Account> = {}): Account {
   return {
@@ -24,7 +25,8 @@ describe('MerchantPaymentOnlineHandler', () => {
   const accounts = {
     wallet: makeAccount({ id: 'wallet-id' }),
     merchant: makeAccount({ id: 'merchant-id' }),
-    feeRevenue: makeAccount({ id: 'fee-id' }),
+    feeRevenue: makeAccount({ id: 'fee-id', type: 'REVENUE' }),
+    platformOperatingCash: makeAccount({ id: 'platform-id' }),
   };
 
   beforeEach(() => {
@@ -64,5 +66,36 @@ describe('MerchantPaymentOnlineHandler', () => {
 
   it('passes for a valid online payment', async () => {
     await expect(validate({ amount: '500.0000' }, accounts)).resolves.not.toThrow();
+  });
+
+  describe('buildJournalEntry — balance and direction', () => {
+    function build(payload: Record<string, unknown>) {
+      return (
+        handler as unknown as {
+          buildJournalEntry: (
+            id: string,
+            p: Record<string, unknown>,
+            a: Record<string, Account>,
+          ) => {
+            lines: Array<{ accountId: string; entryType: 'DEBIT' | 'CREDIT'; amount: string }>;
+          };
+        }
+      ).buildJournalEntry('txn-1', payload, accounts);
+    }
+
+    it('produces a fully balanced journal entry', () => {
+      const dto = build({ amount: '1000.0000', currency: 'INR' });
+      assertJournalBalanced(dto.lines);
+    });
+
+    it('DECREASES the customer wallet balance (regression test for the fixed polarity bug)', () => {
+      const dto = build({ amount: '1000.0000', currency: 'INR' });
+      assertAssetAccountMoves(dto.lines, 'wallet-id', 'decrease');
+    });
+
+    it('INCREASES the merchant settlement balance (net of gateway fee)', () => {
+      const dto = build({ amount: '1000.0000', currency: 'INR' });
+      assertAssetAccountMoves(dto.lines, 'merchant-id', 'increase');
+    });
   });
 });

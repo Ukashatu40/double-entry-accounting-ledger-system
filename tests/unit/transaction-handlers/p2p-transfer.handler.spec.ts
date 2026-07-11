@@ -2,6 +2,7 @@
 // import { UnprocessableEntityException } from '@nestjs/common';
 import { P2pTransferHandler } from '@transactions/handlers/p2p-transfer.handler';
 import type { Account } from '@prisma/client';
+import { assertJournalBalanced, assertAssetAccountMoves } from './journal-entry-assertions.util';
 
 function makeAccount(overrides: Partial<Account> = {}): Account {
   return {
@@ -26,7 +27,8 @@ describe('P2pTransferHandler', () => {
   const accounts = {
     senderWallet: makeAccount({ id: 'sender-id' }),
     recipientWallet: makeAccount({ id: 'recipient-id' }),
-    feeRevenue: makeAccount({ id: 'fee-id' }),
+    feeRevenue: makeAccount({ id: 'fee-id', type: 'REVENUE' }),
+    platformOperatingCash: makeAccount({ id: 'platform-id' }),
   };
 
   beforeEach(() => {
@@ -81,6 +83,43 @@ describe('P2pTransferHandler', () => {
         }
       ).getBalanceCheckAccounts({}, accounts);
       expect(result).toEqual(['sender-id']);
+    });
+  });
+
+  describe('buildJournalEntry', () => {
+    function build(payload: Record<string, unknown>) {
+      return (
+        handler as unknown as {
+          buildJournalEntry: (
+            id: string,
+            p: Record<string, unknown>,
+            a: Record<string, Account>,
+          ) => {
+            lines: Array<{ accountId: string; entryType: 'DEBIT' | 'CREDIT'; amount: string }>;
+          };
+        }
+      ).buildJournalEntry('txn-1', payload, accounts);
+    }
+
+    it('produces a fully balanced journal entry', () => {
+      const dto = build({ amount: '5000.0000', currency: 'INR' });
+      assertJournalBalanced(dto.lines);
+    });
+
+    it('DECREASES the sender wallet balance (regression test for the fixed polarity bug)', () => {
+      const dto = build({ amount: '5000.0000', currency: 'INR' });
+      assertAssetAccountMoves(dto.lines, 'sender-id', 'decrease');
+    });
+
+    it('INCREASES the recipient wallet balance', () => {
+      const dto = build({ amount: '5000.0000', currency: 'INR' });
+      assertAssetAccountMoves(dto.lines, 'recipient-id', 'increase');
+    });
+
+    it('never allows the sender wallet to be the only DEBIT line (the original bug)', () => {
+      const dto = build({ amount: '5000.0000', currency: 'INR' });
+      const senderLine = dto.lines.find((l) => l.accountId === 'sender-id');
+      expect(senderLine?.entryType).toBe('CREDIT');
     });
   });
 });
