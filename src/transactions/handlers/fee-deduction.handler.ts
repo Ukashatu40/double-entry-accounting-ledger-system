@@ -1,15 +1,25 @@
 // src/transactions/handlers/fee-deduction.handler.ts
 import { Injectable, UnprocessableEntityException } from '@nestjs/common';
 import { BaseTransactionHandler } from './base-transaction.handler';
+// import { computeBalancingLeg } from './balancing-leg.util';
 import type { Account } from '@prisma/client';
 import type { CreateJournalEntryDto } from '@ledger/dto/create-journal-entry.dto';
 
 /**
  * Transaction Type #10 — Monthly Maintenance Fee Deduction
  *
- * Journal pattern (spec A4.2):
- *   DEBIT  1001  Customer Wallet       [fee amount]
- *   CREDIT 4001  Transaction Fee Revenue [fee amount]
+ * Correct journal pattern (Table A1.1 + ADR-007):
+ *   CREDIT 1001  Customer Wallet         [fee amount]  (Asset decrease)
+ *   CREDIT 4001  Transaction Fee Revenue [fee amount]  (Revenue increase)
+ *   DEBIT  1050  Platform Operating Cash [plug — see balancing-leg.util.ts]
+ *
+ * NOTE on prior bug: previously DEBITed the wallet (per spec A4.2's
+ * abbreviated table), which increases an Asset account per Table A1.1 —
+ * backwards for a fee deduction. With both "real" legs now correctly
+ * signed as CREDIT (wallet decrease + revenue increase), there is no
+ * natural debit counterpart between just these two accounts — a Platform
+ * Operating Cash debit is required. See
+ * docs/architecture/ADR-007-platform-operating-cash.md.
  *
  * Balance check: wallet must have sufficient balance to cover the fee.
  */

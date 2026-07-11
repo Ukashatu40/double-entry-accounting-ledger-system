@@ -2,16 +2,26 @@
 import { Injectable, UnprocessableEntityException } from '@nestjs/common';
 import Decimal from 'decimal.js';
 import { BaseTransactionHandler } from './base-transaction.handler';
+import { computeBalancingLeg } from './balancing-leg.util';
 import type { Account } from '@prisma/client';
 import type { CreateJournalEntryDto } from '@ledger/dto/create-journal-entry.dto';
 
 /**
  * Transaction Type #14 — Loan EMI Payment
  *
- * Journal pattern (spec A4.2):
- *   DEBIT  1001  Customer Wallet             [total EMI = principal + interest]
- *   CREDIT 1020  Loan Receivable – Personal  [principal component]
- *   CREDIT 4002  Interest Income – Loans     [interest component]
+ * Correct journal pattern (Table A1.1 + ADR-007):
+ *   CREDIT 1001  Customer Wallet             [total EMI = principal + interest]  (Asset decrease)
+ *   CREDIT 1020  Loan Receivable – Personal  [principal component]                (Asset decrease — being paid down)
+ *   CREDIT 4002  Interest Income – Loans     [interest component]                 (Revenue increase)
+ *   DEBIT  1050  Platform Operating Cash     [plug — see balancing-leg.util.ts]
+ *
+ * NOTE on prior bug: the Loan Receivable and Interest Income legs were
+ * already correctly signed (a receivable correctly decreases via CREDIT as
+ * it's paid down; revenue correctly increases via CREDIT) — only the
+ * wallet leg was backwards (previously DEBIT, per spec A4.2's abbreviated
+ * table). With all three "real" legs now correctly signed, all three fall
+ * on the credit side, so a Platform Operating Cash debit is required to
+ * balance — see docs/architecture/ADR-007-platform-operating-cash.md.
  *
  * Balance check: customer wallet must have the full EMI amount.
  * Principal and interest split must be provided by caller (from amortisation schedule).
@@ -46,6 +56,10 @@ export class LoanEmiPaymentHandler extends BaseTransactionHandler {
     return Promise.resolve();
   }
 
+  protected requiresPlatformOperatingCash(): boolean {
+    return true;
+  }
+
   protected buildJournalEntry(
     transactionId: string,
     payload: Record<string, unknown>,
@@ -54,6 +68,7 @@ export class LoanEmiPaymentHandler extends BaseTransactionHandler {
     const wallet = this.requireAccount(accounts, 'wallet');
     const loanReceivable = this.requireAccount(accounts, 'loanReceivable');
     const interestIncome = this.requireAccount(accounts, 'interestIncome');
+    const platformCash = this.requireAccount(accounts, 'platformOperatingCash');
 
     const principal = new Decimal(String(payload['principalComponent'] ?? '0'));
     const interest = new Decimal(String(payload['interestComponent'] ?? '0'));
@@ -63,33 +78,49 @@ export class LoanEmiPaymentHandler extends BaseTransactionHandler {
     const emiNumber = String(payload['emiNumber'] ?? '');
     const loanRef = String(payload['loanReference'] ?? '');
 
+    const realLines = [
+      {
+        accountId: wallet.id,
+        entryType: 'CREDIT' as const,
+        amount: totalEmi.toFixed(4),
+        currency,
+        narrative: `EMI payment${emiNumber ? ` #${emiNumber}` : ''}${loanRef ? ` — loan:${loanRef}` : ''}`,
+      },
+      {
+        accountId: loanReceivable.id,
+        entryType: 'CREDIT' as const,
+        amount: principal.toFixed(4),
+        currency,
+        narrative: `Principal repayment`,
+      },
+      {
+        accountId: interestIncome.id,
+        entryType: 'CREDIT' as const,
+        amount: interest.toFixed(4),
+        currency,
+        narrative: `Interest income on loan`,
+      },
+    ];
+
+    const plug = computeBalancingLeg(realLines);
+    const lines = plug
+      ? [
+          ...realLines,
+          {
+            accountId: platformCash.id,
+            entryType: plug.entryType,
+            amount: plug.amount,
+            currency,
+            narrative: `EMI payment — balancing leg (see ADR-007)`,
+          },
+        ]
+      : realLines;
+
     return {
       referenceType: 'LOAN_EMI_PAYMENT',
       referenceId: transactionId,
       effectiveDate,
-      lines: [
-        {
-          accountId: wallet.id,
-          entryType: 'DEBIT',
-          amount: totalEmi.toFixed(4),
-          currency,
-          narrative: `EMI payment${emiNumber ? ` #${emiNumber}` : ''}${loanRef ? ` — loan:${loanRef}` : ''}`,
-        },
-        {
-          accountId: loanReceivable.id,
-          entryType: 'CREDIT',
-          amount: principal.toFixed(4),
-          currency,
-          narrative: `Principal repayment`,
-        },
-        {
-          accountId: interestIncome.id,
-          entryType: 'CREDIT',
-          amount: interest.toFixed(4),
-          currency,
-          narrative: `Interest income on loan`,
-        },
-      ],
+      lines,
     };
   }
 

@@ -73,6 +73,19 @@ export abstract class BaseTransactionHandler {
   ): Promise<void>;
 
   /**
+   * Override to `true` for any handler whose buildJournalEntry() needs the
+   * "1050 – Platform Operating Cash" clearing account (see ADR-007 and
+   * balancing-leg.util.ts for why this is unavoidable for fee/expense-
+   * splitting transactions). When true, execute() resolves the account
+   * automatically and injects it into accountMap under the key
+   * "platformOperatingCash" — callers never need to supply this account ID
+   * themselves; it is a system account, not a caller-selectable one.
+   */
+  protected requiresPlatformOperatingCash(): boolean {
+    return false;
+  }
+
+  /**
    * Execute the transaction.
    * Called by TransactionsService after idempotency is checked.
    */
@@ -82,6 +95,13 @@ export abstract class BaseTransactionHandler {
     ctx: TransactionContext,
   ): Promise<TransactionResult> {
     const transactionId = uuidv7();
+
+    if (this.requiresPlatformOperatingCash() && !accountMap.platformOperatingCash) {
+      accountMap = {
+        ...accountMap,
+        platformOperatingCash: await ctx.accounts.findByCode('1050'),
+      };
+    }
 
     await this.validateBusinessRules(payload, accountMap);
 

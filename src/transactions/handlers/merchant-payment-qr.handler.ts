@@ -1,16 +1,25 @@
 // src/transactions/handlers/merchant-payment-qr.handler.ts
 import { Injectable, UnprocessableEntityException } from '@nestjs/common';
 import { BaseTransactionHandler } from './base-transaction.handler';
+import { computeBalancingLeg } from './balancing-leg.util';
 import type { Account } from '@prisma/client';
 import type { CreateJournalEntryDto } from '@ledger/dto/create-journal-entry.dto';
 
 /**
  * Transaction Type #5 — Merchant Payment (QR Code)
  *
- * Journal pattern (spec A4.2):
- *   DEBIT  1001  Customer Wallet                [amount + fee]
- *   CREDIT 1010  Merchant Settlement – Pending  [amount]
- *   CREDIT 4001  Transaction Fee Revenue         [fee]
+ * Correct journal pattern (Table A1.1 + spec A5.1's own worked example +
+ * ADR-007 — see balancing-leg.util.ts for the full derivation):
+ *   CREDIT 1001  Customer Wallet                [amount + fee]  (Asset decrease)
+ *   DEBIT  1010  Merchant Settlement – Pending  [amount]        (Asset increase)
+ *   CREDIT 4001  Transaction Fee Revenue         [fee]          (Revenue increase)
+ *   DEBIT  1050  Platform Operating Cash         [plug]
+ *
+ * NOTE on prior bug: this handler previously matched spec A4.2's abbreviated
+ * table (DEBIT wallet / CREDIT merchant), backwards on BOTH legs relative
+ * to Table A1.1 and spec A5.1's own reversal example (which explicitly
+ * shows "Customer Wallet ... Credit 1,020.00" for this exact scenario).
+ * See docs/architecture/ADR-007-platform-operating-cash.md.
  *
  * Balance check: customer wallet must have amount + fee available.
  *
@@ -62,6 +71,10 @@ export class MerchantPaymentQrHandler extends BaseTransactionHandler {
     return Promise.resolve();
   }
 
+  protected requiresPlatformOperatingCash(): boolean {
+    return true;
+  }
+
   protected buildJournalEntry(
     transactionId: string,
     payload: Record<string, unknown>,
@@ -70,6 +83,7 @@ export class MerchantPaymentQrHandler extends BaseTransactionHandler {
     const wallet = this.requireAccount(accounts, 'wallet');
     const merchant = this.requireAccount(accounts, 'merchant');
     const feeRevenue = this.requireAccount(accounts, 'feeRevenue');
+    const platformCash = this.requireAccount(accounts, 'platformOperatingCash');
 
     const amount = parseFloat(String(payload['amount'] ?? '0'));
     const currency = String(payload['currency'] ?? 'INR');
@@ -81,33 +95,49 @@ export class MerchantPaymentQrHandler extends BaseTransactionHandler {
     const totalDebit = (amount + parseFloat(fee)).toFixed(4);
     const amountStr = amount.toFixed(4);
 
+    const realLines = [
+      {
+        accountId: wallet.id,
+        entryType: 'CREDIT' as const,
+        amount: totalDebit,
+        currency,
+        narrative: `QR payment to ${merchantName}${qrRef ? ` ref:${qrRef}` : ''}`,
+      },
+      {
+        accountId: merchant.id,
+        entryType: 'DEBIT' as const,
+        amount: amountStr,
+        currency,
+        narrative: `QR payment from customer — pending settlement`,
+      },
+      {
+        accountId: feeRevenue.id,
+        entryType: 'CREDIT' as const,
+        amount: fee,
+        currency,
+        narrative: `QR payment fee — 0.5% of ${amountStr}`,
+      },
+    ];
+
+    const plug = computeBalancingLeg(realLines);
+    const lines = plug
+      ? [
+          ...realLines,
+          {
+            accountId: platformCash.id,
+            entryType: plug.entryType,
+            amount: plug.amount,
+            currency,
+            narrative: `QR payment — balancing leg (see ADR-007)`,
+          },
+        ]
+      : realLines;
+
     return {
       referenceType: 'MERCHANT_PAYMENT_QR',
       referenceId: transactionId,
       effectiveDate,
-      lines: [
-        {
-          accountId: wallet.id,
-          entryType: 'DEBIT',
-          amount: totalDebit,
-          currency,
-          narrative: `QR payment to ${merchantName}${qrRef ? ` ref:${qrRef}` : ''}`,
-        },
-        {
-          accountId: merchant.id,
-          entryType: 'CREDIT',
-          amount: amountStr,
-          currency,
-          narrative: `QR payment from customer — pending settlement`,
-        },
-        {
-          accountId: feeRevenue.id,
-          entryType: 'CREDIT',
-          amount: fee,
-          currency,
-          narrative: `QR payment fee — 0.5% of ${amountStr}`,
-        },
-      ],
+      lines,
     };
   }
 

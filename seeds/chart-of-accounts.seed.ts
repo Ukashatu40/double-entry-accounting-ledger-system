@@ -95,6 +95,19 @@ export const CHART_OF_ACCOUNTS: AccountSeed[] = [
     description:
       'Intermediate holding account used during FX conversion entries (target currency leg)',
   },
+  {
+    code: '1050',
+    name: 'Platform Operating Cash',
+    type: 'ASSET',
+    subType: 'CURRENT_ASSET',
+    currency: 'INR',
+    description:
+      'System clearing account used to balance journal entries that split a single wallet ' +
+      'movement across a correctly-signed counterparty leg AND a Revenue/Expense leg (e.g. ' +
+      'P2P transfer with a fee, cashback funded from bank operating cash). Not a caller- ' +
+      'selectable account — resolved automatically by handlers via requiresPlatformOperatingCash(). ' +
+      'See ADR-007 for the derivation of why this account is structurally required.',
+  },
 
   // ── LIABILITIES ───────────────────────────────────────────────────────────
   {

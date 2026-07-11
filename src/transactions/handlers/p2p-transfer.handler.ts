@@ -1,29 +1,30 @@
 // src/transactions/handlers/p2p-transfer.handler.ts
 import { Injectable, UnprocessableEntityException } from '@nestjs/common';
 import { BaseTransactionHandler } from './base-transaction.handler';
+import { computeBalancingLeg } from './balancing-leg.util';
 import type { Account } from '@prisma/client';
 import type { CreateJournalEntryDto } from '@ledger/dto/create-journal-entry.dto';
 
 /**
  * Transaction Type #4 — P2P Transfer with fee
  *
- * Journal pattern (spec A1.3 example, page 5):
- *   CREDIT 1001-A  Sender Wallet            [amount + fee]
- *   DEBIT  1001-B  Recipient Wallet         [amount]
- *   CREDIT 4001    Transaction Fee Revenue  [fee]
+ * Correct journal pattern (Table A1.1 + ADR-007 — see balancing-leg.util.ts
+ * for the full derivation of why a Platform Operating Cash leg is required):
+ *   CREDIT 1001-A  Sender Wallet             [amount + fee]  (Asset decrease)
+ *   DEBIT  1001-B  Recipient Wallet          [amount]        (Asset increase)
+ *   CREDIT 4001    Transaction Fee Revenue   [fee]           (Revenue increase)
+ *   DEBIT  1050    Platform Operating Cash   [amount + 2·fee − amount] (plug)
  *
- * Balance check: sender wallet must have amount + fee available.
+ * NOTE on prior bug: this handler previously matched spec A4.2's abbreviated
+ * table (DEBIT sender / CREDIT recipient), which is backwards relative to
+ * Table A1.1 and the spec's own A1.3 worked example — DEBITing an Asset
+ * account *increases* it, so the old code made a sender's balance go UP
+ * when they sent money. See docs/architecture/ADR-007-platform-operating-cash.md.
  *
- * NOTE on spec error: The P2P example in spec A1.3 shows:
- *   - User A Wallet: CREDIT 5,010 (sender pays amount + fee)
- *   - User B Wallet: DEBIT  5,000 (recipient gets amount)
- *   - Fee Revenue:   CREDIT    10 (platform earns fee)
- * Debits (5,000) ≠ Credits (5,010 + 10 = 5,020) — this is WRONG in the spec.
- * Correct pattern: debits must equal credits.
- *   DEBIT  1001-A  Sender Wallet     5,010  (sender's balance decreases)
- *   CREDIT 1001-B  Recipient Wallet  5,000  (recipient's balance increases)
- *   CREDIT 4001    Fee Revenue          10  (platform earns fee)
- * Total debits: 5,010 = Total credits: 5,000 + 10 = 5,010 ✓
+ * Balance check: sender wallet must have amount + fee available (see
+ * getBalanceCheckAccounts — this now works correctly because the sender's
+ * derived balance actually decreases on send, closing the double-spend gap
+ * the polarity bug created).
  */
 @Injectable()
 export class P2pTransferHandler extends BaseTransactionHandler {
@@ -61,6 +62,10 @@ export class P2pTransferHandler extends BaseTransactionHandler {
     return Promise.resolve();
   }
 
+  protected requiresPlatformOperatingCash(): boolean {
+    return true;
+  }
+
   protected buildJournalEntry(
     transactionId: string,
     payload: Record<string, unknown>,
@@ -69,42 +74,60 @@ export class P2pTransferHandler extends BaseTransactionHandler {
     const senderWallet = this.requireAccount(accounts, 'senderWallet');
     const recipientWallet = this.requireAccount(accounts, 'recipientWallet');
     const feeRevenue = this.requireAccount(accounts, 'feeRevenue');
+    const platformCash = this.requireAccount(accounts, 'platformOperatingCash');
 
     const amount = String(payload['amount'] ?? '');
     const currency = String(payload['currency'] ?? 'INR');
     const effectiveDate = String(payload['effectiveDate'] ?? new Date().toISOString());
     const fee = P2pTransferHandler.TRANSFER_FEE;
 
-    // Total sender debit = amount + fee
+    // Total sender debit (economic, informational) = amount + fee
     const totalDebit = (parseFloat(amount) + parseFloat(fee)).toFixed(4);
+
+    // "Real" lines — each entryType is correct per Table A1.1 for its own account.
+    const realLines = [
+      {
+        accountId: senderWallet.id,
+        entryType: 'CREDIT' as const,
+        amount: totalDebit,
+        currency,
+        narrative: `P2P transfer sent — amount ${amount} + fee ${fee}`,
+      },
+      {
+        accountId: recipientWallet.id,
+        entryType: 'DEBIT' as const,
+        amount,
+        currency,
+        narrative: `P2P transfer received from ${senderWallet.id}`,
+      },
+      {
+        accountId: feeRevenue.id,
+        entryType: 'CREDIT' as const,
+        amount: fee,
+        currency,
+        narrative: `P2P transfer fee`,
+      },
+    ];
+
+    const plug = computeBalancingLeg(realLines);
+    const lines = plug
+      ? [
+          ...realLines,
+          {
+            accountId: platformCash.id,
+            entryType: plug.entryType,
+            amount: plug.amount,
+            currency,
+            narrative: `P2P transfer — balancing leg (see ADR-007)`,
+          },
+        ]
+      : realLines;
 
     return {
       referenceType: 'P2P_TRANSFER',
       referenceId: transactionId,
       effectiveDate,
-      lines: [
-        {
-          accountId: senderWallet.id,
-          entryType: 'DEBIT',
-          amount: totalDebit,
-          currency,
-          narrative: `P2P transfer sent — amount ${amount} + fee ${fee}`,
-        },
-        {
-          accountId: recipientWallet.id,
-          entryType: 'CREDIT',
-          amount,
-          currency,
-          narrative: `P2P transfer received from ${senderWallet.id}`,
-        },
-        {
-          accountId: feeRevenue.id,
-          entryType: 'CREDIT',
-          amount: fee,
-          currency,
-          narrative: `P2P transfer fee`,
-        },
-      ],
+      lines,
     };
   }
 

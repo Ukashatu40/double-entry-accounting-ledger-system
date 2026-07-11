@@ -1,16 +1,22 @@
 // src/transactions/handlers/bill-payment.handler.ts
 import { Injectable, UnprocessableEntityException } from '@nestjs/common';
 import { BaseTransactionHandler } from './base-transaction.handler';
+import { computeBalancingLeg } from './balancing-leg.util';
 import type { Account } from '@prisma/client';
 import type { CreateJournalEntryDto } from '@ledger/dto/create-journal-entry.dto';
 
 /**
  * Transaction Type #7 — Bill Payment
  *
- * Journal pattern (spec A4.2):
- *   DEBIT  1001  Customer Wallet                [bill amount + convenience fee]
- *   CREDIT 1010  Merchant Settlement – Pending  [bill amount]
- *   CREDIT 4001  Transaction Fee Revenue         [convenience fee]
+ * Correct journal pattern (Table A1.1 + ADR-007):
+ *   CREDIT 1001  Customer Wallet                [bill amount + convenience fee]  (Asset decrease)
+ *   DEBIT  1010  Merchant Settlement – Pending  [bill amount]                    (Asset increase)
+ *   CREDIT 4001  Transaction Fee Revenue         [convenience fee]                (Revenue increase)
+ *   DEBIT  1050  Platform Operating Cash         [plug — see balancing-leg.util.ts]
+ *
+ * NOTE on prior bug: previously matched spec A4.2's abbreviated table
+ * (DEBIT wallet / CREDIT biller), backwards on both legs per Table A1.1.
+ * See docs/architecture/ADR-007-platform-operating-cash.md.
  *
  * Balance check: customer wallet must have bill amount + fee available.
  *
@@ -53,6 +59,10 @@ export class BillPaymentHandler extends BaseTransactionHandler {
     return Promise.resolve();
   }
 
+  protected requiresPlatformOperatingCash(): boolean {
+    return true;
+  }
+
   protected buildJournalEntry(
     transactionId: string,
     payload: Record<string, unknown>,
@@ -61,6 +71,7 @@ export class BillPaymentHandler extends BaseTransactionHandler {
     const wallet = this.requireAccount(accounts, 'wallet');
     const biller = this.requireAccount(accounts, 'biller');
     const feeRevenue = this.requireAccount(accounts, 'feeRevenue');
+    const platformCash = this.requireAccount(accounts, 'platformOperatingCash');
 
     const amount = parseFloat(String(payload['amount'] ?? '0'));
     const currency = String(payload['currency'] ?? 'INR');
@@ -71,33 +82,49 @@ export class BillPaymentHandler extends BaseTransactionHandler {
     const totalDebit = (amount + parseFloat(fee)).toFixed(4);
     const amountStr = amount.toFixed(4);
 
+    const realLines = [
+      {
+        accountId: wallet.id,
+        entryType: 'CREDIT' as const,
+        amount: totalDebit,
+        currency,
+        narrative: `Bill payment to ${billerName}${billRef ? ` ref:${billRef}` : ''}`,
+      },
+      {
+        accountId: biller.id,
+        entryType: 'DEBIT' as const,
+        amount: amountStr,
+        currency,
+        narrative: `Bill settlement to ${billerName}`,
+      },
+      {
+        accountId: feeRevenue.id,
+        entryType: 'CREDIT' as const,
+        amount: fee,
+        currency,
+        narrative: `Bill payment convenience fee`,
+      },
+    ];
+
+    const plug = computeBalancingLeg(realLines);
+    const lines = plug
+      ? [
+          ...realLines,
+          {
+            accountId: platformCash.id,
+            entryType: plug.entryType,
+            amount: plug.amount,
+            currency,
+            narrative: `Bill payment — balancing leg (see ADR-007)`,
+          },
+        ]
+      : realLines;
+
     return {
       referenceType: 'BILL_PAYMENT',
       referenceId: transactionId,
       effectiveDate,
-      lines: [
-        {
-          accountId: wallet.id,
-          entryType: 'DEBIT',
-          amount: totalDebit,
-          currency,
-          narrative: `Bill payment to ${billerName}${billRef ? ` ref:${billRef}` : ''}`,
-        },
-        {
-          accountId: biller.id,
-          entryType: 'CREDIT',
-          amount: amountStr,
-          currency,
-          narrative: `Bill settlement to ${billerName}`,
-        },
-        {
-          accountId: feeRevenue.id,
-          entryType: 'CREDIT',
-          amount: fee,
-          currency,
-          narrative: `Bill payment convenience fee`,
-        },
-      ],
+      lines,
     };
   }
 
