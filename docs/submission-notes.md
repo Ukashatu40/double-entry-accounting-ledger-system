@@ -31,21 +31,47 @@ for the global `SUM(debits) = SUM(credits)` invariant check.
 
 ### Error 2 — P2P Transfer Journal Entry (Part A1.3, page 5)
 
-**Spec example** shows:
+**Correction note (post-audit):** this entry was originally
+mis-diagnosed — a prior version of this document claimed the spec's
+column labels were swapped and "fixed" it by debiting the sender wallet
+and crediting the recipient wallet. That "fix" was itself backwards
+(per Table A1.1, an Asset account like a customer wallet decreases via
+CREDIT, not DEBIT) and propagated the same polarity error into 13 of the
+20 transaction handlers before being caught in an independent audit and
+corrected. Full root-cause and fix: **`docs/architecture/ADR-007-platform-operating-cash.md`**.
+The paragraph below reflects the corrected understanding.
 
-- User A Wallet: CREDIT 5,010 (correct — sender pays amount + fee)
-- User B Wallet: DEBIT 5,000 (correct — recipient gets amount)
-- Fee Revenue: CREDIT 10 (correct — platform earns fee)
+**Spec example** (Section A1.3) shows, for a P2P transfer of INR 5,000
+with a INR 10 fee:
 
-**Problem:** Entry type labels. The spec labels User A as CREDIT and User B
-as DEBIT, but the debit/credit direction in the spec header row is:
-`DEBIT (INR) | CREDIT (INR)` — the amounts are in the wrong columns
-for User A (5,010 should be in the Credit column since the wallet
-is being reduced).
+- User A Wallet: CREDIT 5,010 (sender pays amount + fee)
+- User B Wallet: DEBIT 5,000 (recipient gets amount)
+- Fee Revenue: CREDIT 10 (platform earns fee)
 
-**Our fix:** Implemented correct pattern: DEBIT sender wallet (reduces asset),
-CREDIT recipient wallet (increases asset), CREDIT fee revenue. Total debits
-(5,010) = total credits (5,000 + 10). Documented in handler comments.
+The **column placement and DEBIT/CREDIT labels here are correct** per
+Table A1.1 — CREDIT correctly decreases the sender's wallet (an Asset
+account), DEBIT correctly increases the recipient's wallet, and CREDIT
+correctly increases Fee Revenue.
+
+**The actual problem:** the entry as printed does not balance. Total
+debits = 5,000 (User B only). Total credits = 5,010 + 10 = 5,020. This
+is a genuine, provable arithmetic error in the spec's own worked
+example — not a column-swap, and not something a hand-derived "2×fee"
+correction consistently fixes either (verified symbolically; see
+ADR-007). A Credit-normal Revenue account can never be the sole
+double-entry counterpart to an Asset decrease without leaving a residual
+unaccounted for, because the wallet's decrease already "explains" where
+the fee physically went.
+
+**Our fix:** introduced `1050 – Platform Operating Cash` (Asset), a
+system-resolved clearing account (same role as the pre-existing `1043
+FX Revaluation Suspense` / `9002 Suspense – Unreconciled`) that absorbs
+the residual so every "real" line (wallet, counterparty, Fee Revenue)
+keeps its economically correct sign. The residual is computed once, by
+a shared utility (`computeBalancingLeg()` —
+`src/transactions/handlers/balancing-leg.util.ts`), never hand-derived
+per handler. All 13 affected handlers were rewritten; see ADR-007 for
+the full list and the corrected journal pattern for each.
 
 ### Error 3 — FX Multi-Currency Journal Entry (Part A3.2, page 10)
 
