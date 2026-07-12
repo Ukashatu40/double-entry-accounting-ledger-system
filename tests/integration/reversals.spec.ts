@@ -130,7 +130,16 @@ describe('ReversalsService (integration)', () => {
 
     const txnId = await makeQrPayment('1000.0000');
     const balanceAfterPayment = await ledger.getAccountBalance(walletId);
-    expect(balanceAfterPayment).not.toBe(balanceAfterFunding);
+
+    // Strong, exact, DIRECTIONAL assertion (not just "changed somehow") — this
+    // is the check that would have caught the original debit/credit polarity
+    // bug, where the wallet balance INCREASED on payment instead of
+    // decreasing. Fee is 0.5% of 1000 = 5.0000, so total debit is 1005.0000.
+    const expectedAfterPayment = parseFloat(String(balanceAfterFunding)) - 1005.0;
+    expect(parseFloat(String(balanceAfterPayment))).toBeCloseTo(expectedAfterPayment, 4);
+    expect(parseFloat(String(balanceAfterPayment))).toBeLessThan(
+      parseFloat(String(balanceAfterFunding)),
+    );
 
     await reversals.reverseTransaction(
       { originalTransactionId: txnId, reason: 'Test full reversal' },

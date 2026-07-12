@@ -111,6 +111,13 @@ describe('Balance Sheet, Income Statement, FX Exposure (integration)', () => {
     );
   }
 
+  // NOTE: postFeeRevenue/postExpense below post raw, simplified 2-line
+  // entries directly via LedgerService — they exist only to seed Revenue/
+  // Expense account balances for these reporting assertions, and are NOT
+  // representative of FeeDeductionHandler's actual (corrected) journal
+  // pattern. See src/transactions/handlers/fee-deduction.handler.ts and
+  // docs/architecture/ADR-007-platform-operating-cash.md for the real
+  // three-leg pattern a fee deduction actually produces.
   async function postFeeRevenue(amount: string): Promise<void> {
     await ledger.postJournalEntry(
       {

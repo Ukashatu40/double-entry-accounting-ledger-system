@@ -46,7 +46,15 @@ export interface TransactionResult {
 export abstract class BaseTransactionHandler {
   /**
    * Build the journal entry DTO for this transaction type.
-   * Each handler implements the specific debit/credit pattern from spec A4.2.
+   *
+   * IMPORTANT: derive the debit/credit pattern from Table A1.1 (Asset:
+   * Debit=Increase/Credit=Decrease, etc.) and the spec's worked examples
+   * (A1.3, A3.2, A5.1) — NOT from Section A4.2's abbreviated "Journal
+   * Pattern" column, which contradicts Table A1.1 for several transaction
+   * types and was the root cause of a real bug fixed under ADR-007. When a
+   * Revenue/Expense leg is involved alongside a wallet movement, use
+   * computeBalancingLeg() (balancing-leg.util.ts) rather than hand-deriving
+   * a residual amount.
    */
   protected abstract buildJournalEntry(
     transactionId: string,
