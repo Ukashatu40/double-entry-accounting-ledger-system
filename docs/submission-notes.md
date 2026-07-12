@@ -148,23 +148,44 @@ logic (which account to protect) in the handler where it belongs.
 
 <!-- append to docs/submission-notes.md -->
 
-## Additional Design Note — Fee Revenue Recognition Scope
+## Resolved Design Note — Fee Revenue Recognition Scope
 
-Handlers that generate fee revenue as a byproduct of a customer-facing
-payment (P2P transfer, merchant QR/online payment, bill payment) credit
-Fee Revenue directly against the payer's wallet debit, without a distinct
-"platform operating cash" asset account absorbing the fee. This satisfies
-the assessment's explicit correctness bar — every journal entry produces
-SUM(debits) = SUM(credits), verified by the 1,000-transaction stress test
-and enforced by `assertBalanced()` before every commit — and mirrors the
-convention used in the specification's own worked P2P example (Part A1.3).
+**Status: resolved.** An earlier version of this document described the
+below as a known, accepted simplification. An independent audit
+identified it as a genuine, exploitable correctness bug rather than an
+acceptable scope trade-off, and it has since been fixed — see
+`docs/architecture/ADR-007-platform-operating-cash.md` for the full
+derivation and fix.
 
-A stricter real-world implementation would introduce a dedicated
-"Platform Operating Account" (asset) debited whenever fee revenue is
-recognized, so that the system-wide accounting equation
-(Assets = Liabilities + Equity) holds at the aggregate level, not just
-within each individual journal entry. This is noted as a scoped
-simplification rather than left undocumented.
+_(Original note, preserved for the record):_ "Handlers that generate fee
+revenue as a byproduct of a customer-facing payment (P2P transfer,
+merchant QR/online payment, bill payment) credit Fee Revenue directly
+against the payer's wallet debit... This satisfies the assessment's
+explicit correctness bar — every journal entry produces SUM(debits) =
+SUM(credits)... and mirrors the convention used in the specification's
+own worked P2P example."
+
+**What was actually wrong:** "mirrors the specification's own worked
+example" was the problem, not a mitigating factor — the spec's own P2P
+example has the wallet leg signed backwards relative to Table A1.1 (an
+Asset account decreases via CREDIT, not DEBIT), and 13 of 20 handlers
+had copied that same backwards convention from spec Section A4.2's
+abbreviated table. The entries were numerically balanced (hence passing
+`assertBalanced()` and the stress test) but moved individual account
+balances in the economically wrong direction — e.g. a customer's wallet
+balance _increased_ when they sent a P2P transfer or paid a merchant.
+Trial-balance-only testing cannot catch this class of bug; it requires
+asserting on the _direction_ of individual account movement, which
+`tests/unit/transaction-handlers/journal-entry-assertions.util.ts` now
+does for every affected handler.
+
+**The fix**, in short: introduce `1050 – Platform Operating Cash`
+(Asset) as a system-resolved clearing account, and centralize the
+residual-balancing arithmetic in one shared, unit-tested utility
+(`computeBalancingLeg()`) rather than allowing it to be hand-derived per
+handler. Full details, including the symbolic proof that this class of
+transaction cannot balance with correct signs using only the "obvious"
+three accounts, are in ADR-007.
 
 ## Post-Initial-Submission Hardening (Gap Closure Pass)
 
@@ -226,3 +247,55 @@ not just the final state):
 
 Final test suite: 327 tests passing across 53 suites (unit + integration),
 all green on GitHub Actions CI.
+
+## Second Hardening Pass — Independent Audit Findings (2026-07-11)
+
+An independent audit, performed after the first submission draft was
+otherwise complete, cross-checked every transaction handler against
+Table A1.1 and the spec's own worked examples rather than trusting
+Section A4.2's abbreviated summary table. It found that **13 of 20
+transaction handlers had the customer wallet leg signed backwards** —
+numerically balanced (passing `assertBalanced()` and the 1,000-tx stress
+test) but moving individual account balances in the economically wrong
+direction. Full details in `docs/architecture/ADR-007-platform-operating-cash.md`.
+
+This pass:
+
+1. Fixed the polarity in all 13 affected handlers (`p2p-transfer`,
+   `merchant-payment-qr`, `merchant-payment-online`, `bill-payment`,
+   `loan-emi-payment`, `fee-deduction`, `cashback-credit`,
+   `promotional-credit`, `interest-payout`, `chargeback`, `refund-full`,
+   `refund-partial`, `reward-redemption`).
+2. Introduced `1050 – Platform Operating Cash` and
+   `computeBalancingLeg()` so residual-balancing arithmetic is computed
+   once, centrally, and unit-tested — never hand-derived per handler
+   (this is what made the original bug possible to introduce
+   independently 13 times without anyone noticing the inconsistency).
+3. Added directional balance assertions
+   (`journal-entry-assertions.util.ts`) to every affected handler's test
+   suite — the exact check that would have caught the original bug, and
+   that trial-balance-only testing structurally cannot provide.
+4. Added `tests/integration/partitioning.spec.ts` — the partitioning
+   migration was previously applied only in CI, never verified against
+   Postgres's own catalog, and never exercised by the documented local
+   Quick Start steps. Both gaps are now closed (README updated;
+   verification test added).
+5. Added `docs/case-studies/case-study-analysis.md` answering all 20
+   Part C analysis questions as a dedicated, consolidated deliverable
+   (previously scattered across ADRs and code comments only).
+6. Corrected this document's own "Error 2" writeup (P2P transfer, Part
+   A1.3), which had previously mis-diagnosed the spec's imbalance as a
+   column-swap and "fixed" it by introducing the same backwards
+   polarity that (1) above corrects — see the Error 2 section above for
+   the corrected analysis.
+
+**Why this matters more than a typical bug fix**: the original,
+backwards-signed handlers meant a customer's derived wallet balance
+_increased_ on P2P transfers, merchant payments, and bill payments —
+and the insufficient-balance check compares against that same derived
+balance. In combination, this meant the balance check's guarantee did
+not hold for those transaction types; a customer's spendable balance
+never correctly decreased on those specific paths. This is precisely
+the "no double-spend possible" guarantee the assessment's Concurrency &
+Safety and Accounting Correctness rubric dimensions require, so this
+pass treats the fix as a correctness blocker, not a polish item.

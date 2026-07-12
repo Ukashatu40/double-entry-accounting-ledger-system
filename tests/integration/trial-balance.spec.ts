@@ -65,9 +65,14 @@ describe('TrialBalanceService (integration)', () => {
 
     // A second wallet-type account to act as the P2P recipient — the seed
     // only provisions one instance of code 1001, so a distinct GL account is
-    // created here purely for this test's recipient leg.
-    const recipient = await prisma.account.create({
-      data: {
+    // created here purely for this test's recipient leg. Uses upsert
+    // (not create) because cleanDatabase() intentionally does NOT truncate
+    // accounts between tests/runs, so a bare create() fails with a unique
+    // constraint violation on any run after the first.
+    const recipient = await prisma.account.upsert({
+      where: { code: 'TEST-1001-B' },
+      update: {},
+      create: {
         id: uuidv7(),
         code: 'TEST-1001-B',
         name: 'Test Recipient Wallet',

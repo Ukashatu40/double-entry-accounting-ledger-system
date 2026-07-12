@@ -26,11 +26,58 @@ export interface ReversalResult {
 @Injectable()
 export class ReversalsService {
   private readonly logger = new Logger(ReversalsService.name);
+  private platformOperatingCashAccountId: string | null = null;
 
   constructor(
     private readonly db: DatabaseService,
     private readonly ledger: LedgerService,
   ) {}
+
+  /**
+   * Derives the economically meaningful "original amount" of a
+   * transaction from its raw ledger lines.
+   *
+   * IMPORTANT: this is NOT `SUM(debit lines)`. Since ADR-007
+   * (docs/architecture/ADR-007-platform-operating-cash.md), correctly-
+   * signed journal entries for fee/expense-splitting transactions
+   * include a "1050 Platform Operating Cash" balancing leg whose
+   * entryType and magnitude are a mechanical artifact of whatever
+   * residual the OTHER lines happen to leave — summing debit lines
+   * naively would pull that plug leg's amount into "original amount",
+   * producing a number with no economic meaning (and one that silently
+   * changes if the plug's magnitude changes, e.g. across handler
+   * refactors). It also is NOT reliably "the DEBIT side" — which side
+   * represents the customer's payment depends on transaction direction
+   * (compare a deposit, where the wallet leg is DEBIT, against a
+   * merchant payment, where it's CREDIT).
+   *
+   * The robust invariant instead: excluding the Platform Operating Cash
+   * leg, the single largest-magnitude line in a well-formed origination
+   * entry is always the customer-facing total (principal + fee/whatever
+   * else they were charged) — every other "real" line is a component
+   * split of that total across counterparties/P&L accounts. This holds
+   * regardless of entryType direction or how many component lines exist.
+   */
+  private async deriveOriginalAmount(entries: LedgerEntry[]): Promise<Decimal> {
+    const platformAccountId = await this.getPlatformOperatingCashAccountId();
+
+    const economicLines = entries.filter((e) => e.accountId !== platformAccountId);
+    const relevant = economicLines.length > 0 ? economicLines : entries;
+
+    return relevant.reduce((max, e) => {
+      const amount = new Decimal(e.amount.toString());
+      return amount.gt(max) ? amount : max;
+    }, new Decimal(0));
+  }
+
+  private async getPlatformOperatingCashAccountId(): Promise<string | null> {
+    if (this.platformOperatingCashAccountId !== null) {
+      return this.platformOperatingCashAccountId;
+    }
+    const account = await this.db.account.findUnique({ where: { code: '1050' } });
+    this.platformOperatingCashAccountId = account?.id ?? null;
+    return this.platformOperatingCashAccountId;
+  }
 
   /**
    * Full reversal — creates an exact mirror of the original journal entry.
@@ -78,10 +125,9 @@ export class ReversalsService {
     // Verify not already reversed
     await this.assertNotAlreadyReversed(dto.originalTransactionId);
 
-    // Compute total reversed amount for the reversal record
-    const totalAmount = originalEntries
-      .filter((e) => e.entryType === 'DEBIT')
-      .reduce((sum, e) => sum.plus(new Decimal(e.amount.toString())), new Decimal(0));
+    // Compute total reversed amount for the reversal record — see
+    // deriveOriginalAmount() for why this is NOT a naive sum of DEBIT lines.
+    const totalAmount = await this.deriveOriginalAmount(originalEntries);
 
     const reversalTransactionId = uuidv7();
 
@@ -188,10 +234,9 @@ export class ReversalsService {
 
     await this.assertNotFullyReversed(dto.originalTransactionId);
 
-    // Total original amount (sum of all debit lines)
-    const originalAmount = originalEntries
-      .filter((e) => e.entryType === 'DEBIT')
-      .reduce((sum, e) => sum.plus(new Decimal(e.amount.toString())), new Decimal(0));
+    // Total original amount — see deriveOriginalAmount() for why this is
+    // NOT a naive sum of DEBIT lines.
+    const originalAmount = await this.deriveOriginalAmount(originalEntries);
 
     const refundAmount = new Decimal(dto.refundAmount);
 
@@ -396,9 +441,7 @@ export class ReversalsService {
       where: { referenceId: transactionId, status: 'POSTED' },
     });
 
-    const originalAmount = originalEntries
-      .filter((e) => e.entryType === 'DEBIT')
-      .reduce((sum, e) => sum.plus(new Decimal(e.amount.toString())), new Decimal(0));
+    const originalAmount = await this.deriveOriginalAmount(originalEntries);
 
     const priorFullReversal = await this.db.reversal.findFirst({
       where: {

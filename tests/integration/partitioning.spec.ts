@@ -110,7 +110,7 @@ describe('Table partitioning (integration)', () => {
 
     await ledger.postJournalEntry(
       {
-        referenceType: 'DEPOSIT_BANK_TRANSFER',
+        referenceType: 'CUSTOMER_DEPOSIT_BANK',
         referenceId: '01932a1b-0000-7000-8000-000000000900',
         effectiveDate,
         lines: [
@@ -154,7 +154,7 @@ describe('Table partitioning (integration)', () => {
     for (const [i, effectiveDate] of dates.entries()) {
       await ledger.postJournalEntry(
         {
-          referenceType: 'DEPOSIT_BANK_TRANSFER',
+          referenceType: 'CUSTOMER_DEPOSIT_BANK',
           referenceId: `01932a1b-0000-7000-8000-00000000091${i.toString()}`,
           effectiveDate,
           lines: [
@@ -194,7 +194,7 @@ describe('Table partitioning (integration)', () => {
     const referenceId = '01932a1b-0000-7000-8000-000000000920';
     await ledger.postJournalEntry(
       {
-        referenceType: 'DEPOSIT_BANK_TRANSFER',
+        referenceType: 'CUSTOMER_DEPOSIT_BANK',
         referenceId,
         effectiveDate: '2026-05-01T00:00:00Z',
         lines: [
