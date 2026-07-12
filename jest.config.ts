@@ -35,6 +35,7 @@ const config: Config = {
       statements: 80,
     },
   },
+  watchman: false,
 
   // CRITICAL: forces every test FILE across every PROJECT to run one at a
   // time, in a single worker process. Integration tests share one physical
