@@ -174,6 +174,8 @@ npm run trial-balance    # CLI trial balance check
 
 See `docs/submission-notes.md` for a full analysis of the four deliberate errors found in the specification, how they were identified, and how the implementation corrects them.
 
+See `docs/case-studies/case-study-analysis.md` for answers to all Part C case study analysis questions (Paytm, Revolut, Wirecard, Razorpay, SVB), each grounded in the actual mechanisms implemented here rather than generic prose.
+
 ---
 
 ## Compliance Notes
