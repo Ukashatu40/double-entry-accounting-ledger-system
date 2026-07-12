@@ -83,7 +83,7 @@ describe('Table partitioning (integration)', () => {
     // partition DDL against this database, closing the audit gap where
     // Quick Start setup never applied it at all.
     const rows = await db.$queryRaw<Array<{ partstrat: string }>>`
-      SELECT partstrat
+      SELECT partstrat::text AS partstrat
       FROM pg_partitioned_table pt
       JOIN pg_class c ON c.oid = pt.partrelid
       WHERE c.relname = 'ledger_entries'
