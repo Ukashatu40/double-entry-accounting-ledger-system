@@ -1,5 +1,6 @@
 import { PromotionalCreditHandler } from '@transactions/handlers/promotional-credit.handler';
 import type { Account } from '@prisma/client';
+import { assertJournalBalanced, assertAssetAccountMoves } from './journal-entry-assertions.util';
 
 function makeAccount(overrides: Partial<Account> = {}): Account {
   return {
@@ -22,8 +23,9 @@ function makeAccount(overrides: Partial<Account> = {}): Account {
 describe('PromotionalCreditHandler', () => {
   let handler: PromotionalCreditHandler;
   const accounts = {
-    cashbackExpense: makeAccount({ id: 'cb-id' }),
+    cashbackExpense: makeAccount({ id: 'cb-id', type: 'EXPENSE' }),
     wallet: makeAccount({ id: 'wallet-id' }),
+    platformOperatingCash: makeAccount({ id: 'platform-id' }),
   };
 
   beforeEach(() => {
@@ -60,5 +62,31 @@ describe('PromotionalCreditHandler', () => {
     await expect(
       validate({ amount: '50.0000', promoCode: 'PROMO1' }, accounts),
     ).resolves.not.toThrow();
+  });
+
+  describe('buildJournalEntry — balance and direction', () => {
+    function build(payload: Record<string, unknown>) {
+      return (
+        handler as unknown as {
+          buildJournalEntry: (
+            id: string,
+            p: Record<string, unknown>,
+            a: Record<string, Account>,
+          ) => {
+            lines: Array<{ accountId: string; entryType: 'DEBIT' | 'CREDIT'; amount: string }>;
+          };
+        }
+      ).buildJournalEntry('txn-1', payload, accounts);
+    }
+
+    it('produces a fully balanced journal entry', () => {
+      const dto = build({ amount: '50.0000', currency: 'INR', promoCode: 'PROMO1' });
+      assertJournalBalanced(dto.lines);
+    });
+
+    it('INCREASES the customer wallet balance (regression test for the fixed polarity bug)', () => {
+      const dto = build({ amount: '50.0000', currency: 'INR', promoCode: 'PROMO1' });
+      assertAssetAccountMoves(dto.lines, 'wallet-id', 'increase');
+    });
   });
 });

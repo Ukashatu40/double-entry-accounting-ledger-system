@@ -1,5 +1,6 @@
 import { FeeDeductionHandler } from '@transactions/handlers/fee-deduction.handler';
 import type { Account } from '@prisma/client';
+import { assertJournalBalanced, assertAssetAccountMoves } from './journal-entry-assertions.util';
 
 function makeAccount(overrides: Partial<Account> = {}): Account {
   return {
@@ -23,7 +24,8 @@ describe('FeeDeductionHandler', () => {
   let handler: FeeDeductionHandler;
   const accounts = {
     wallet: makeAccount({ id: 'wallet-id' }),
-    feeRevenue: makeAccount({ id: 'fee-id' }),
+    feeRevenue: makeAccount({ id: 'fee-id', type: 'REVENUE' }),
+    platformOperatingCash: makeAccount({ id: 'platform-id' }),
   };
 
   beforeEach(() => {
@@ -52,5 +54,31 @@ describe('FeeDeductionHandler', () => {
 
   it('passes for a valid fee deduction', async () => {
     await expect(validate({ amount: '50.0000' }, accounts)).resolves.not.toThrow();
+  });
+
+  describe('buildJournalEntry — balance and direction', () => {
+    function build(payload: Record<string, unknown>) {
+      return (
+        handler as unknown as {
+          buildJournalEntry: (
+            id: string,
+            p: Record<string, unknown>,
+            a: Record<string, Account>,
+          ) => {
+            lines: Array<{ accountId: string; entryType: 'DEBIT' | 'CREDIT'; amount: string }>;
+          };
+        }
+      ).buildJournalEntry('txn-1', payload, accounts);
+    }
+
+    it('produces a fully balanced journal entry', () => {
+      const dto = build({ amount: '50.0000', currency: 'INR' });
+      assertJournalBalanced(dto.lines);
+    });
+
+    it('DECREASES the customer wallet balance (regression test for the fixed polarity bug)', () => {
+      const dto = build({ amount: '50.0000', currency: 'INR' });
+      assertAssetAccountMoves(dto.lines, 'wallet-id', 'decrease');
+    });
   });
 });

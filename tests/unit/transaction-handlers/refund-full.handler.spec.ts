@@ -2,6 +2,7 @@
 import { UnprocessableEntityException } from '@nestjs/common';
 import { RefundFullHandler } from '@transactions/handlers/refund-full.handler';
 import type { Account } from '@prisma/client';
+import { assertJournalBalanced, assertAssetAccountMoves } from './journal-entry-assertions.util';
 
 function makeAccount(overrides: Partial<Account> = {}): Account {
   return {
@@ -40,7 +41,8 @@ describe('RefundFullHandler', () => {
   const validAccounts = {
     merchantSettlement: makeAccount({ id: 'merchant-id', status: 'ACTIVE' }),
     wallet: makeAccount({ id: 'wallet-id', status: 'ACTIVE' }),
-    feeRevenue: makeAccount({ id: 'fee-id', status: 'ACTIVE' }),
+    feeRevenue: makeAccount({ id: 'fee-id', status: 'ACTIVE', type: 'REVENUE' }),
+    platformOperatingCash: makeAccount({ id: 'platform-id', status: 'ACTIVE' }),
   };
 
   function validate(
@@ -83,7 +85,7 @@ describe('RefundFullHandler', () => {
   });
 
   describe('buildJournalEntry', () => {
-    it('produces a balanced journal entry including the fee reversal', () => {
+    it('produces a balanced journal entry including the fee reversal and balancing leg', () => {
       const dto = (handler as unknown as { buildJournalEntry: Builder }).buildJournalEntry(
         'txn-id',
         {
@@ -95,14 +97,48 @@ describe('RefundFullHandler', () => {
         },
         validAccounts,
       );
-      const debits = dto.lines
-        .filter((l) => l.entryType === 'DEBIT')
-        .reduce((s, l) => s + parseFloat(l.amount), 0);
-      const credits = dto.lines
-        .filter((l) => l.entryType === 'CREDIT')
-        .reduce((s, l) => s + parseFloat(l.amount), 0);
-      expect(debits).toBeCloseTo(credits, 4);
-      expect(dto.lines).toHaveLength(3);
+      assertJournalBalanced(
+        dto.lines as Array<{ accountId: string; entryType: 'DEBIT' | 'CREDIT'; amount: string }>,
+      );
+      // wallet(1020 debit) + merchant(1000 credit) + feeRevenue(20 debit) leaves a
+      // residual that the Platform Operating Cash plug absorbs — 4 lines total.
+      expect(dto.lines).toHaveLength(4);
+    });
+
+    it('INCREASES the customer wallet balance (regression test for the fixed polarity bug)', () => {
+      const dto = (handler as unknown as { buildJournalEntry: Builder }).buildJournalEntry(
+        'txn-id',
+        {
+          amount: '1000.0000',
+          feeAmount: '20.0000',
+          currency: 'INR',
+          originalTransactionId: 'orig-id',
+        },
+        validAccounts,
+      );
+      assertAssetAccountMoves(
+        dto.lines as Array<{ accountId: string; entryType: 'DEBIT' | 'CREDIT'; amount: string }>,
+        'wallet-id',
+        'increase',
+      );
+    });
+
+    it('DECREASES the merchant settlement balance', () => {
+      const dto = (handler as unknown as { buildJournalEntry: Builder }).buildJournalEntry(
+        'txn-id',
+        {
+          amount: '1000.0000',
+          feeAmount: '20.0000',
+          currency: 'INR',
+          originalTransactionId: 'orig-id',
+        },
+        validAccounts,
+      );
+      assertAssetAccountMoves(
+        dto.lines as Array<{ accountId: string; entryType: 'DEBIT' | 'CREDIT'; amount: string }>,
+        'merchant-id',
+        'decrease',
+      );
     });
 
     it('defaults feeAmount to 0 when not provided', () => {
@@ -113,6 +149,9 @@ describe('RefundFullHandler', () => {
       );
       const walletLine = dto.lines.find((l) => l.accountId === 'wallet-id');
       expect(walletLine?.amount).toBe('1000.0000');
+      assertJournalBalanced(
+        dto.lines as Array<{ accountId: string; entryType: 'DEBIT' | 'CREDIT'; amount: string }>,
+      );
     });
   });
 

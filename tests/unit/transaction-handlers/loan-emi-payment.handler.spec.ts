@@ -1,6 +1,7 @@
 // tests/unit/transaction-handlers/loan-emi-payment.handler.spec.ts
 import { LoanEmiPaymentHandler } from '@transactions/handlers/loan-emi-payment.handler';
 import type { Account } from '@prisma/client';
+import { assertJournalBalanced, assertAssetAccountMoves } from './journal-entry-assertions.util';
 
 function makeAccount(overrides: Partial<Account> = {}): Account {
   return {
@@ -25,7 +26,8 @@ describe('LoanEmiPaymentHandler', () => {
   const accounts = {
     wallet: makeAccount({ id: 'wallet-id' }),
     loanReceivable: makeAccount({ id: 'loan-id' }),
-    interestIncome: makeAccount({ id: 'interest-id' }),
+    interestIncome: makeAccount({ id: 'interest-id', type: 'REVENUE' }),
+    platformOperatingCash: makeAccount({ id: 'platform-id' }),
   };
 
   beforeEach(() => {
@@ -72,5 +74,36 @@ describe('LoanEmiPaymentHandler', () => {
     await expect(
       validate({ principalComponent: '500.0000', interestComponent: '50.0000' }, accounts),
     ).resolves.not.toThrow();
+  });
+
+  describe('buildJournalEntry — balance and direction', () => {
+    function build(payload: Record<string, unknown>) {
+      return (
+        handler as unknown as {
+          buildJournalEntry: (
+            id: string,
+            p: Record<string, unknown>,
+            a: Record<string, Account>,
+          ) => {
+            lines: Array<{ accountId: string; entryType: 'DEBIT' | 'CREDIT'; amount: string }>;
+          };
+        }
+      ).buildJournalEntry('txn-1', payload, accounts);
+    }
+
+    it('produces a fully balanced journal entry', () => {
+      const dto = build({ principalComponent: '8000.0000', interestComponent: '1603.0000' });
+      assertJournalBalanced(dto.lines);
+    });
+
+    it('DECREASES the customer wallet balance (regression test for the fixed polarity bug)', () => {
+      const dto = build({ principalComponent: '8000.0000', interestComponent: '1603.0000' });
+      assertAssetAccountMoves(dto.lines, 'wallet-id', 'decrease');
+    });
+
+    it('DECREASES the loan receivable balance (principal paid down)', () => {
+      const dto = build({ principalComponent: '8000.0000', interestComponent: '1603.0000' });
+      assertAssetAccountMoves(dto.lines, 'loan-id', 'decrease');
+    });
   });
 });

@@ -2,6 +2,7 @@
 // import { UnprocessableEntityException } from '@nestjs/common';
 import { RefundPartialHandler } from '@transactions/handlers/refund-partial.handler';
 import type { Account } from '@prisma/client';
+import { assertJournalBalanced, assertAssetAccountMoves } from './journal-entry-assertions.util';
 
 function makeAccount(overrides: Partial<Account> = {}): Account {
   return {
@@ -27,7 +28,8 @@ describe('RefundPartialHandler', () => {
   const validAccounts = {
     merchantSettlement: makeAccount({ id: 'merchant-id' }),
     wallet: makeAccount({ id: 'wallet-id' }),
-    feeRevenue: makeAccount({ id: 'fee-id' }),
+    feeRevenue: makeAccount({ id: 'fee-id', type: 'REVENUE' }),
+    platformOperatingCash: makeAccount({ id: 'platform-id' }),
   };
 
   beforeEach(() => {
@@ -149,14 +151,28 @@ describe('RefundPartialHandler', () => {
     it('always produces a balanced journal entry across all three policies', () => {
       for (const policy of ['PROPORTIONAL', 'FULL', 'NONE']) {
         const dto = build(policy, '300.0000', '1000.0000', '15.0000');
-        const debits = dto.lines
-          .filter((l) => l.entryType === 'DEBIT')
-          .reduce((s, l) => s + parseFloat(l.amount), 0);
-        const credits = dto.lines
-          .filter((l) => l.entryType === 'CREDIT')
-          .reduce((s, l) => s + parseFloat(l.amount), 0);
-        expect(debits).toBeCloseTo(credits, 4);
+        assertJournalBalanced(
+          dto.lines as Array<{ accountId: string; entryType: 'DEBIT' | 'CREDIT'; amount: string }>,
+        );
       }
+    });
+
+    it('INCREASES the customer wallet balance (regression test for the fixed polarity bug)', () => {
+      const dto = build('PROPORTIONAL', '500.0000', '1000.0000', '20.0000');
+      assertAssetAccountMoves(
+        dto.lines as Array<{ accountId: string; entryType: 'DEBIT' | 'CREDIT'; amount: string }>,
+        'wallet-id',
+        'increase',
+      );
+    });
+
+    it('DECREASES the merchant settlement balance', () => {
+      const dto = build('PROPORTIONAL', '500.0000', '1000.0000', '20.0000');
+      assertAssetAccountMoves(
+        dto.lines as Array<{ accountId: string; entryType: 'DEBIT' | 'CREDIT'; amount: string }>,
+        'merchant-id',
+        'decrease',
+      );
     });
   });
 

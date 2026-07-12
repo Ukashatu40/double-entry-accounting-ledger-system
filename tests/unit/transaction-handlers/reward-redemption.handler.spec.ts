@@ -1,5 +1,6 @@
 import { RewardRedemptionHandler } from '@transactions/handlers/reward-redemption.handler';
 import type { Account } from '@prisma/client';
+import { assertJournalBalanced, assertAssetAccountMoves } from './journal-entry-assertions.util';
 
 function makeAccount(overrides: Partial<Account> = {}): Account {
   return {
@@ -22,8 +23,9 @@ function makeAccount(overrides: Partial<Account> = {}): Account {
 describe('RewardRedemptionHandler', () => {
   let handler: RewardRedemptionHandler;
   const accounts = {
-    rewardsLiability: makeAccount({ id: 'rl-id' }),
+    rewardsLiability: makeAccount({ id: 'rl-id', type: 'LIABILITY' }),
     wallet: makeAccount({ id: 'wallet-id' }),
+    platformOperatingCash: makeAccount({ id: 'platform-id' }),
   };
 
   beforeEach(() => {
@@ -54,5 +56,31 @@ describe('RewardRedemptionHandler', () => {
 
   it('passes for a valid redemption at or above the minimum', async () => {
     await expect(validate({ pointsRedeemed: '150' }, accounts)).resolves.not.toThrow();
+  });
+
+  describe('buildJournalEntry — balance and direction', () => {
+    function build(payload: Record<string, unknown>) {
+      return (
+        handler as unknown as {
+          buildJournalEntry: (
+            id: string,
+            p: Record<string, unknown>,
+            a: Record<string, Account>,
+          ) => {
+            lines: Array<{ accountId: string; entryType: 'DEBIT' | 'CREDIT'; amount: string }>;
+          };
+        }
+      ).buildJournalEntry('txn-1', payload, accounts);
+    }
+
+    it('produces a fully balanced journal entry', () => {
+      const dto = build({ pointsRedeemed: '400' });
+      assertJournalBalanced(dto.lines);
+    });
+
+    it('INCREASES the customer wallet balance (regression test for the fixed polarity bug)', () => {
+      const dto = build({ pointsRedeemed: '400' });
+      assertAssetAccountMoves(dto.lines, 'wallet-id', 'increase');
+    });
   });
 });
