@@ -143,6 +143,24 @@ export default function (data) {
         return ['INSUFFICIENT_BALANCE', 'BUSINESS_RULE_VIOLATION'].includes(b.error.type);
       },
     });
+  } else if (resp.status === 503) {
+    // Transient DB write-conflict that survived the app's built-in retries
+    // (see docs/architecture/ADR-002-concurrency-strategy.md) — expected
+    // infrastructure behavior under this level of same-account contention,
+    // not a bug. The app returns a structured, retryable 503 with
+    // Retry-After for exactly this case (see global-exception.filter.ts).
+    let body;
+    try {
+      body = JSON.parse(resp.body);
+    } catch {
+      body = {};
+    }
+    if (body.error && body.error.type === 'TRANSACTION_CONFLICT') {
+      console.warn(`Write conflict VU=${__VU.toString()} — retry would resolve`);
+    } else {
+      unexpectedErrors.add(1);
+      console.error(`Unexpected 503: body=${resp.body}`);
+    }
   } else {
     // Classify the failure
     let body;
@@ -152,18 +170,12 @@ export default function (data) {
       body = {};
     }
 
-    const isWriteConflict =
-      resp.status === 500 && body.error && (body.error.message || '').includes('write conflict');
-
     const isStaleIdempotencyKey =
       resp.status === 409 &&
       body.error &&
       (body.error.message || '').includes('already used for a different request');
 
-    if (isWriteConflict) {
-      // Advisory lock serialized the requests — infrastructure, not a bug
-      console.warn(`Write conflict VU=${__VU.toString()} — retry would resolve`);
-    } else if (isStaleIdempotencyKey) {
+    if (isStaleIdempotencyKey) {
       // Keys from a previous run — means db wasn't wiped before this run
       console.error(`Stale idempotency key VU=${__VU.toString()} — wipe DB before running`);
       unexpectedErrors.add(1);

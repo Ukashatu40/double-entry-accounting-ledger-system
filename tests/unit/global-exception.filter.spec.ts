@@ -4,11 +4,12 @@ import { GlobalExceptionFilter } from '@common/filters/global-exception.filter';
 
 function makeMockHost(headers: Record<string, string> = {}): {
   host: ArgumentsHost;
-  reply: { status: jest.Mock; send: jest.Mock };
+  reply: { status: jest.Mock; send: jest.Mock; header: jest.Mock };
 } {
   const send = jest.fn();
-  const status = jest.fn().mockReturnValue({ send });
-  const reply = { status, send };
+  const header = jest.fn();
+  const status = jest.fn().mockReturnValue({ send, header });
+  const reply = { status, send, header };
 
   const request = { headers };
 
@@ -19,7 +20,7 @@ function makeMockHost(headers: Record<string, string> = {}): {
     }),
   } as unknown as ArgumentsHost;
 
-  return { host, reply: { status, send } };
+  return { host, reply: { status, send, header } };
 }
 
 describe('GlobalExceptionFilter', () => {
@@ -84,6 +85,32 @@ describe('GlobalExceptionFilter', () => {
     const body = reply.send.mock.calls[0][0];
     expect(body.error.type).toBe('INTERNAL_ERROR');
     expect(reply.status).toHaveBeenCalledWith(HttpStatus.INTERNAL_SERVER_ERROR);
+  });
+
+  it('classifies a TransactionWriteConflict as a retryable 503, not a bare 500', () => {
+    const { host, reply } = makeMockHost();
+    filter.catch(new Error('TransactionWriteConflict'), host);
+    const body = reply.send.mock.calls[0][0];
+    expect(body.error.type).toBe('TRANSACTION_CONFLICT');
+    expect(body.error.code).toBe('SYS_5003');
+    expect(reply.status).toHaveBeenCalledWith(HttpStatus.SERVICE_UNAVAILABLE);
+    expect(reply.header).toHaveBeenCalledWith('Retry-After', '1');
+  });
+
+  it('classifies a deadlock detected error as a retryable 503', () => {
+    const { host, reply } = makeMockHost();
+    filter.catch(new Error('deadlock detected while acquiring advisory lock'), host);
+    const body = reply.send.mock.calls[0][0];
+    expect(body.error.type).toBe('TRANSACTION_CONFLICT');
+    expect(reply.status).toHaveBeenCalledWith(HttpStatus.SERVICE_UNAVAILABLE);
+  });
+
+  it('classifies a "could not serialize" SERIALIZABLE conflict as a retryable 503', () => {
+    const { host, reply } = makeMockHost();
+    filter.catch(new Error('could not serialize access due to concurrent update'), host);
+    const body = reply.send.mock.calls[0][0];
+    expect(body.error.type).toBe('TRANSACTION_CONFLICT');
+    expect(reply.status).toHaveBeenCalledWith(HttpStatus.SERVICE_UNAVAILABLE);
   });
 
   it('includes a request_id in every error response, honouring X-Request-ID header', () => {

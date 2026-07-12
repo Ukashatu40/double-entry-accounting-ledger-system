@@ -68,6 +68,19 @@ function resolveErrorCode(exception: unknown): { type: string; code: string } {
     if (msg.includes('already reversed')) return { type: 'ALREADY_REVERSED', code: 'TXN_4004' };
     if (msg.includes('refund exceeds'))
       return { type: 'REFUND_EXCEEDS_ORIGINAL', code: 'TXN_4005' };
+    // Transient DB-level contention that survived withRetryTransaction's
+    // built-in retries (database.service.ts) — this is infrastructure
+    // load, not an application bug or a business rule violation. Per spec
+    // A10.1/A10.4, this belongs in the 503/retryable category, not a bare
+    // unclassified 500 — the client should back off and retry with a new
+    // idempotency key attempt, not treat it as a permanent failure.
+    if (
+      msg.includes('transactionwriteconflict') ||
+      msg.includes('deadlock detected') ||
+      msg.includes('could not serialize')
+    ) {
+      return { type: 'TRANSACTION_CONFLICT', code: 'SYS_5003' };
+    }
   }
 
   return { type: 'INTERNAL_ERROR', code: 'SYS_5000' };
@@ -114,6 +127,14 @@ export class GlobalExceptionFilter implements ExceptionFilter {
     }
 
     const { type, code } = resolveErrorCode(exception);
+
+    // Transient conflicts get reclassified to 503 + Retry-After, per spec
+    // A10.4's graceful-degradation guidance — these are retry-worthy, not
+    // permanent failures, and a bare 500 doesn't communicate that to callers.
+    if (type === 'TRANSACTION_CONFLICT') {
+      status = HttpStatus.SERVICE_UNAVAILABLE;
+      void reply.header('Retry-After', '1');
+    }
 
     // Log internal errors with full context
     if (status >= 500) {
