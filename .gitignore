@@ -44,3 +44,5 @@ Thumbs.db
 # Docker volumes (local dev data)
 .docker-data/
 /generated/prisma
+
+493556C_Ledger_System_Double_Entry_Accounting.pdf

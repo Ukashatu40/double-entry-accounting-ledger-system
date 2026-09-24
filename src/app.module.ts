@@ -2,6 +2,7 @@
 import { Module } from '@nestjs/common';
 import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { ConfigModule } from '@nestjs/config';
+import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { LoggerModule } from 'nestjs-pino';
 import { uuidv7 } from 'uuidv7';
 import { DatabaseModule } from '@database/database.module';
@@ -61,6 +62,14 @@ import databaseConfig from '@config/database.config';
       } as any,
     }),
 
+    // Graceful degradation under load: caps each caller (by IP, the
+    // default tracker) to 100 requests per 60s across the whole API.
+    // Addresses a gap the original code review flagged — no rate limiting
+    // was registered anywhere. Health checks are exempted via
+    // @SkipThrottle() (see health.controller.ts) since orchestrator
+    // liveness/readiness probes poll frequently and aren't attacker traffic.
+    ThrottlerModule.forRoot([{ ttl: 60_000, limit: 100 }]),
+
     DatabaseModule,
     HealthModule,
     AccountsModule,
@@ -82,6 +91,9 @@ import databaseConfig from '@config/database.config';
 
     // Global API key guard — every route protected unless @Public()
     { provide: APP_GUARD, useClass: ApiKeyGuard },
+
+    // Global rate limit guard — see ThrottlerModule.forRoot() above
+    { provide: APP_GUARD, useClass: ThrottlerGuard },
   ],
 })
 export class AppModule {}
