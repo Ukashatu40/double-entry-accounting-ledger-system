@@ -4,7 +4,7 @@
 ![Coverage](https://github.com/Ukashatu40/BED-6C-Ukashatu-Ledger/actions/workflows/coverage.yml/badge.svg)
 
 **Neo-banking Ledger System with Double-Entry Accounting & Immutable Audit Trail**  
-Zetheta Algorithms Assessment BED-6C | Intern ID: 493556B
+Personal project — double-entry ledger engine with India + Nigeria market localization
 
 ---
 

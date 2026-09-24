@@ -5,7 +5,7 @@
 
 Project NovaPayLedger {
   database_type: 'PostgreSQL'
-  Note: 'Double-Entry Accounting Ledger with Immutable Audit Trail — Zetheta BED-6C'
+  Note: 'Double-Entry Accounting Ledger with Immutable Audit Trail'
 }
 
 //////////////////////////////////////////////////////////////

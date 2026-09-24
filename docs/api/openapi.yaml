@@ -392,6 +392,23 @@ paths:
         - fx
       security:
         - api-key: []
+  /fx/revaluation/run:
+    post:
+      operationId: FxController_runRevaluation
+      summary: Run the unrealised FX gain/loss revaluation batch job
+      description: >-
+        Revalues all foreign-currency balances at the current closing rate and posts the unrealised gain/loss difference
+        to a dedicated P&L account, offset against an FX revaluation suspense account. Designed to run nightly via a
+        scheduled job (spec A3.3). No customer wallet is touched — this is a reporting-only adjustment, not a real
+        currency conversion.
+      parameters: []
+      responses:
+        '200':
+          description: ''
+      tags:
+        - fx
+      security:
+        - api-key: []
   /reports/trial-balance:
     get:
       operationId: ReportingController_trialBalance
@@ -661,11 +678,7 @@ paths:
         - api-key: []
 info:
   title: NovaPay Ledger System
-  description: |-
-    Double-Entry Accounting Ledger with Immutable Audit Trail — Zetheta BED-6C
-
-    Assessment: Ledger System with Double-Entry Accounting & Immutable Audit Trail
-    Intern ID: 493556B
+  description: Double-Entry Accounting Ledger with Immutable Audit Trail
   version: 1.0.0
   contact: {}
 tags:
@@ -732,6 +745,15 @@ components:
           type: string
           example: INR
           description: ISO 4217 currency code
+          enum:
+            - INR
+            - USD
+            - EUR
+            - GBP
+            - JPY
+            - AED
+            - SGD
+            - NGN
         description:
           type: string
           example: GBP wallet for UK customers
@@ -832,6 +854,8 @@ components:
             - CHARGEBACK
             - REWARD_REDEMPTION
             - ACCOUNT_CLOSURE_SWEEP
+            - NIP_TRANSFER
+            - USSD_TRANSFER
         referenceId:
           type: string
           description: UUID of the originating transaction
@@ -927,6 +951,8 @@ components:
             - CHARGEBACK
             - REWARD_REDEMPTION
             - ACCOUNT_CLOSURE_SWEEP
+            - NIP_TRANSFER
+            - USSD_TRANSFER
         effectiveDate:
           type: string
           description: ISO 8601 effective date
@@ -952,10 +978,28 @@ components:
           type: string
           example: USD
           description: ISO 4217 base currency
+          enum:
+            - INR
+            - USD
+            - EUR
+            - GBP
+            - JPY
+            - AED
+            - SGD
+            - NGN
         quoteCurrency:
           type: string
           example: INR
           description: ISO 4217 quote currency
+          enum:
+            - INR
+            - USD
+            - EUR
+            - GBP
+            - JPY
+            - AED
+            - SGD
+            - NGN
         rate:
           type: string
           example: '83.42150000'

@@ -21,11 +21,7 @@ async function main(): Promise<void> {
 
   const config = new DocumentBuilder()
     .setTitle('NovaPay Ledger System')
-    .setDescription(
-      'Double-Entry Accounting Ledger with Immutable Audit Trail — Zetheta BED-6C\n\n' +
-        'Assessment: Ledger System with Double-Entry Accounting & Immutable Audit Trail\n' +
-        'Intern ID: 493556B',
-    )
+    .setDescription('Double-Entry Accounting Ledger with Immutable Audit Trail')
     .setVersion('1.0.0')
     .addApiKey({ type: 'apiKey', name: 'X-API-Key', in: 'header' }, 'api-key')
     .addTag('accounts', 'Chart of Accounts management')
