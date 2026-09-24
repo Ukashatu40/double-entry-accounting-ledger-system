@@ -103,6 +103,24 @@ describe('FxConversionHandler', () => {
     ).resolves.not.toThrow();
   });
 
+  it('rejects an unsupported sourceCurrency (regression test for the currency-validation retrofit)', async () => {
+    await expect(
+      validate(
+        { sourceAmount: '100.0000', exchangeRate: '83.5', sourceCurrency: 'ZZZ' },
+        accounts,
+      ),
+    ).rejects.toThrow('Unsupported currency: ZZZ');
+  });
+
+  it('rejects an unsupported targetCurrency', async () => {
+    await expect(
+      validate(
+        { sourceAmount: '100.0000', exchangeRate: '83.5', targetCurrency: 'ZZZ' },
+        accounts,
+      ),
+    ).rejects.toThrow('Unsupported currency: ZZZ');
+  });
+
   describe('buildJournalEntry', () => {
     function build(payload: Record<string, unknown>) {
       return (

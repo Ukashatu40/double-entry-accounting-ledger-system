@@ -71,6 +71,12 @@ describe('P2pTransferHandler', () => {
     expect(() => validate({ amount: '300000.0000' }, accounts)).toThrow('exceeds limit');
   });
 
+  it('rejects an unsupported currency code (regression test for the currency-validation retrofit)', () => {
+    expect(() => validate({ amount: '500.0000', currency: 'ZZZ' }, accounts)).toThrow(
+      'Unsupported currency',
+    );
+  });
+
   it('passes for a valid transfer between two distinct active accounts', async () => {
     await expect(validate({ amount: '500.0000' }, accounts)).resolves.not.toThrow();
   });

@@ -3,6 +3,7 @@ import { Injectable, UnprocessableEntityException } from '@nestjs/common';
 import Decimal from 'decimal.js';
 import { BaseTransactionHandler } from './base-transaction.handler';
 import { computeBalancingLeg } from './balancing-leg.util';
+import { requireSupportedCurrency } from './payload-validation.util';
 import type { Account } from '@prisma/client';
 import type { CreateJournalEntryDto } from '@ledger/dto/create-journal-entry.dto';
 
@@ -45,6 +46,8 @@ export class BillPaymentHandler extends BaseTransactionHandler {
     if (biller.status !== 'ACTIVE') {
       throw new UnprocessableEntityException(`Biller settlement account is not active`);
     }
+
+    requireSupportedCurrency(payload);
 
     const amount = new Decimal(String(payload['amount'] ?? '0'));
     if (amount.lte(0)) {

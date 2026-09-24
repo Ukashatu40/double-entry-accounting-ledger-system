@@ -3,6 +3,7 @@ import { Injectable, UnprocessableEntityException } from '@nestjs/common';
 import Decimal from 'decimal.js';
 import { BaseTransactionHandler } from './base-transaction.handler';
 import { computeBalancingLeg } from './balancing-leg.util';
+import { requireSupportedCurrency } from './payload-validation.util';
 import { FxRateService } from '@fx/fx-rate.service';
 import type { Account } from '@prisma/client';
 import type { CreateJournalEntryDto } from '@ledger/dto/create-journal-entry.dto';
@@ -51,8 +52,8 @@ export class FxConversionHandler extends BaseTransactionHandler {
     // trusting a client-supplied exchangeRate. This enforces staleness
     // rejection (Incident Day 6) at the point of transaction, not just
     // when previewing via GET /fx/convert.
-    const sourceCurrency = String(payload['sourceCurrency'] ?? 'USD');
-    const targetCurrency = String(payload['targetCurrency'] ?? 'INR');
+    const sourceCurrency = requireSupportedCurrency(payload, 'sourceCurrency', 'USD');
+    const targetCurrency = requireSupportedCurrency(payload, 'targetCurrency', 'INR');
     // Throws UnprocessableEntityException if stale or missing — propagates naturally
     await this.fxRateService.getCurrentRate(sourceCurrency, targetCurrency);
   }

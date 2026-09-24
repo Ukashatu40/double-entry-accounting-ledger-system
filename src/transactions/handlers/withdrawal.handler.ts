@@ -2,6 +2,7 @@
 import { Injectable, UnprocessableEntityException } from '@nestjs/common';
 import Decimal from 'decimal.js';
 import { BaseTransactionHandler } from './base-transaction.handler';
+import { requireSupportedCurrency } from './payload-validation.util';
 import type { Account } from '@prisma/client';
 import type { CreateJournalEntryDto } from '@ledger/dto/create-journal-entry.dto';
 
@@ -32,6 +33,8 @@ export class WithdrawalHandler extends BaseTransactionHandler {
     if (walletAccount.status !== 'ACTIVE') {
       throw new UnprocessableEntityException(`Wallet account ${walletAccount.code} is not active`);
     }
+
+    requireSupportedCurrency(payload);
 
     const amount = parseFloat(String(payload['amount'] ?? '0'));
     if (amount > parseFloat(WithdrawalHandler.MAX_DAILY_WITHDRAWAL)) {

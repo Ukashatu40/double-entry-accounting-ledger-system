@@ -52,6 +52,12 @@ describe('DepositBankHandler', () => {
     );
   });
 
+  it('rejects an unsupported currency code (regression test for the currency-validation retrofit)', () => {
+    expect(() => validate({ amount: '5000.0000', currency: 'ZZZ' }, accounts)).toThrow(
+      'Unsupported currency',
+    );
+  });
+
   it('passes for a valid active wallet and amount within limits', async () => {
     await expect(validate({ amount: '5000.0000' }, accounts)).resolves.not.toThrow();
   });

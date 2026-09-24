@@ -3,6 +3,7 @@ import { Injectable, UnprocessableEntityException } from '@nestjs/common';
 import Decimal from 'decimal.js';
 import { BaseTransactionHandler } from './base-transaction.handler';
 import { computeBalancingLeg } from './balancing-leg.util';
+import { requireSupportedCurrency } from './payload-validation.util';
 import type { Account } from '@prisma/client';
 import type { CreateJournalEntryDto } from '@ledger/dto/create-journal-entry.dto';
 
@@ -52,6 +53,8 @@ export class P2pTransferHandler extends BaseTransactionHandler {
     if (senderWallet.id === recipientWallet.id) {
       throw new UnprocessableEntityException('Sender and recipient cannot be the same account');
     }
+
+    requireSupportedCurrency(payload);
 
     const amount = new Decimal(String(payload['amount'] ?? '0'));
     if (amount.gt(new Decimal(P2pTransferHandler.MAX_TRANSFER))) {

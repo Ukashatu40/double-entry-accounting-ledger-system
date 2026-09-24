@@ -1,6 +1,7 @@
 // src/transactions/handlers/deposit-bank.handler.ts
 import { Injectable, UnprocessableEntityException } from '@nestjs/common';
 import { BaseTransactionHandler } from './base-transaction.handler';
+import { requireSupportedCurrency } from './payload-validation.util';
 import type { Account } from '@prisma/client';
 import type { CreateJournalEntryDto } from '@ledger/dto/create-journal-entry.dto';
 
@@ -28,6 +29,7 @@ export class DepositBankHandler extends BaseTransactionHandler {
     accounts: Record<string, Account>,
   ): Promise<void> {
     const walletAccount = this.requireAccount(accounts, 'wallet');
+    requireSupportedCurrency(payload);
 
     if (walletAccount.status !== 'ACTIVE') {
       throw new UnprocessableEntityException(`Wallet account ${walletAccount.code} is not active`);

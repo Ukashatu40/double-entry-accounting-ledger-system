@@ -3,6 +3,7 @@ import { Injectable, UnprocessableEntityException } from '@nestjs/common';
 import Decimal from 'decimal.js';
 import { BaseTransactionHandler } from './base-transaction.handler';
 import { computeBalancingLeg } from './balancing-leg.util';
+import { requireSupportedCurrency } from './payload-validation.util';
 import type { Account } from '@prisma/client';
 import type { CreateJournalEntryDto } from '@ledger/dto/create-journal-entry.dto';
 
@@ -37,6 +38,8 @@ export class FeeDeductionHandler extends BaseTransactionHandler {
         `Wallet account is not active — fee deduction skipped`,
       );
     }
+
+    requireSupportedCurrency(payload);
 
     const amount = parseFloat(String(payload['amount'] ?? '0'));
     if (amount <= 0) {

@@ -2,6 +2,7 @@
 import { Injectable, UnprocessableEntityException } from '@nestjs/common';
 import Decimal from 'decimal.js';
 import { BaseTransactionHandler } from './base-transaction.handler';
+import { requireSupportedCurrency } from './payload-validation.util';
 import type { Account } from '@prisma/client';
 import type { CreateJournalEntryDto } from '@ledger/dto/create-journal-entry.dto';
 
@@ -29,6 +30,8 @@ export class InterestAccrualHandler extends BaseTransactionHandler {
     payload: Record<string, unknown>,
     _accounts: Record<string, Account>,
   ): Promise<void> {
+    requireSupportedCurrency(payload);
+
     const principal = parseFloat(String(payload['principal'] ?? '0'));
     const annualRate = parseFloat(String(payload['annualRate'] ?? '0'));
 

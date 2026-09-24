@@ -2,6 +2,7 @@
 import { Injectable, UnprocessableEntityException } from '@nestjs/common';
 import Decimal from 'decimal.js';
 import { BaseTransactionHandler } from './base-transaction.handler';
+import { requireSupportedCurrency } from './payload-validation.util';
 import type { Account } from '@prisma/client';
 import type { CreateJournalEntryDto } from '@ledger/dto/create-journal-entry.dto';
 
@@ -27,6 +28,7 @@ export class AccountClosureHandler extends BaseTransactionHandler {
     accounts: Record<string, Account>,
   ): Promise<void> {
     const wallet = this.requireAccount(accounts, 'wallet');
+    requireSupportedCurrency(payload);
 
     if (wallet.status === 'CLOSED') {
       throw new UnprocessableEntityException('Account is already closed');

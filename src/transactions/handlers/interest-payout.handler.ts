@@ -3,6 +3,7 @@ import { Injectable, UnprocessableEntityException } from '@nestjs/common';
 import Decimal from 'decimal.js';
 import { BaseTransactionHandler } from './base-transaction.handler';
 import { computeBalancingLeg } from './balancing-leg.util';
+import { requireSupportedCurrency } from './payload-validation.util';
 import type { Account } from '@prisma/client';
 import type { CreateJournalEntryDto } from '@ledger/dto/create-journal-entry.dto';
 
@@ -39,6 +40,8 @@ export class InterestPayoutHandler extends BaseTransactionHandler {
     payload: Record<string, unknown>,
     _accounts: Record<string, Account>,
   ): Promise<void> {
+    requireSupportedCurrency(payload);
+
     const grossInterest = parseFloat(String(payload['grossInterest'] ?? '0'));
     if (grossInterest <= 0) {
       throw new UnprocessableEntityException('Gross interest amount must be positive');

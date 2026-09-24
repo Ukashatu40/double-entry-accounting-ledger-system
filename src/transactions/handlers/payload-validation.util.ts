@@ -6,17 +6,21 @@ import { isSupportedCurrency } from '@common/types/currency.type';
  * Extracts a currency code from a transaction payload and rejects it if it
  * isn't one of this system's supported currencies (Currency.type.ts).
  *
- * NOTE: none of the 20 existing handlers call this today — they each do a
- * bare `String(payload['currency'] ?? 'INR')` with no membership check,
- * a pre-existing gap this codebase carries. Retrofitting all 20 is out of
- * scope here; this helper is introduced for the new Nigeria-specific
- * handlers (nip-transfer, ussd-transfer) so they don't repeat that gap.
+ * Falls back to `defaultValue` (INR, matching every handler's own
+ * pre-existing `String(payload['currency'] ?? 'INR')` convention) when the
+ * field is entirely absent — this deliberately mirrors that established
+ * default rather than requiring every caller to now pass one explicitly,
+ * which would have been a breaking behavior change. The actual gap this
+ * closes is different: previously a *present but garbage* currency string
+ * (e.g. "ZZZ") silently passed through with no membership check at all;
+ * that case is now rejected regardless of the default.
  */
 export function requireSupportedCurrency(
   payload: Record<string, unknown>,
   key = 'currency',
+  defaultValue = 'INR',
 ): string {
-  const value = String(payload[key] ?? '');
+  const value = String(payload[key] ?? defaultValue);
   if (!isSupportedCurrency(value)) {
     throw new UnprocessableEntityException(`Unsupported currency: ${value}`);
   }
