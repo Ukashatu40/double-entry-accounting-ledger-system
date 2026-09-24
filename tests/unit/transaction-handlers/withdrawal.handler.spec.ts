@@ -64,4 +64,18 @@ describe('WithdrawalHandler', () => {
       expect(result).toEqual(['wallet-id']);
     });
   });
+
+  describe('getLimitCheckSpecs', () => {
+    it('checks the wallet against the withdrawal amount', () => {
+      const result = (
+        handler as unknown as {
+          getLimitCheckSpecs: (
+            p: Record<string, unknown>,
+            a: Record<string, Account>,
+          ) => { accountId: string; amount: string }[];
+        }
+      ).getLimitCheckSpecs({ amount: '500.0000' }, accounts);
+      expect(result).toEqual([{ accountId: 'wallet-id', amount: '500.0000' }]);
+    });
+  });
 });

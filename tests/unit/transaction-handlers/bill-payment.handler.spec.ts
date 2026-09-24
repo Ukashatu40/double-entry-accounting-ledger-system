@@ -96,4 +96,19 @@ describe('BillPaymentHandler', () => {
       assertAssetAccountMoves(dto.lines, 'biller-id', 'increase');
     });
   });
+
+  describe('getLimitCheckSpecs', () => {
+    it('checks the wallet against amount + convenience fee', () => {
+      const result = (
+        handler as unknown as {
+          getLimitCheckSpecs: (
+            p: Record<string, unknown>,
+            a: Record<string, Account>,
+          ) => { accountId: string; amount: string }[];
+        }
+      ).getLimitCheckSpecs({ amount: '500.0000' }, accounts);
+      // 500 + 5 (CONVENIENCE_FEE) = 505.0000
+      expect(result).toEqual([{ accountId: 'wallet-id', amount: '505.0000' }]);
+    });
+  });
 });

@@ -76,6 +76,23 @@ export class MerchantPaymentQrHandler extends BaseTransactionHandler {
     return true;
   }
 
+  protected getLimitCheckSpecs(
+    payload: Record<string, unknown>,
+    accounts: Record<string, Account>,
+  ): { accountId: string; amount: string }[] {
+    const wallet = accounts['wallet'];
+    if (!wallet) return [];
+
+    const amount = new Decimal(String(payload['amount'] ?? '0'));
+    const fee = this.calculateFee(amount);
+    const totalDebit = amount
+      .plus(new Decimal(fee))
+      .toDecimalPlaces(4, Decimal.ROUND_HALF_UP)
+      .toFixed(4);
+
+    return [{ accountId: wallet.id, amount: totalDebit }];
+  }
+
   protected buildJournalEntry(
     transactionId: string,
     payload: Record<string, unknown>,

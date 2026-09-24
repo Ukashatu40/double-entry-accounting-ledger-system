@@ -201,6 +201,46 @@ describe('NGN localization (integration)', () => {
     expect(tb.isBalanced).toBe(true);
   });
 
+  it('posts VAT (7.5% of fee) and the CBN Cybersecurity Levy (0.005% of amount) on every NGN NIP_TRANSFER', async () => {
+    await fundNgnWallet(ngnWalletId, '100000.0000');
+    const prisma = db as unknown as PrismaClient;
+    const [vat, levy] = await Promise.all([
+      prisma.account.findUnique({ where: { code: '2040' } }),
+      prisma.account.findUnique({ where: { code: '2042' } }),
+    ]);
+    if (!vat || !levy) throw new Error('VAT (2040) / Cybersecurity Levy (2042) accounts missing');
+
+    const result = await transactions.process(
+      {
+        type: 'NIP_TRANSFER',
+        effectiveDate: new Date().toISOString(),
+        payload: {
+          senderWalletId: ngnWalletId,
+          recipientWalletId: recipientNgnWalletId,
+          feeRevenueAccountId: feeRevenueId,
+          amount: '5000.0000',
+          currency: 'NGN',
+        },
+      },
+      'test_actor',
+      `nip-idem-${uuidv7()}`,
+      'test_actor',
+    );
+
+    expect(result.journal.totalDebits).toBe(result.journal.totalCredits);
+
+    const vatEntry = result.journal.entries.find((e) => e.accountId === vat.id);
+    expect(vatEntry?.entryType).toBe('CREDIT');
+    expect(new Decimal(vatEntry!.amount.toString()).toFixed(4)).toBe('2.0160'); // 7.5% of fee 26.8800
+
+    const levyEntry = result.journal.entries.find((e) => e.accountId === levy.id);
+    expect(levyEntry?.entryType).toBe('CREDIT');
+    expect(new Decimal(levyEntry!.amount.toString()).toFixed(4)).toBe('0.2500'); // 0.005% of amount 5000
+
+    const tb = await trialBalance.generate();
+    expect(tb.isBalanced).toBe(true);
+  });
+
   it('rejects a NIP_TRANSFER from a Tier-1 account that exceeds its seeded per-transaction limit', async () => {
     await fundNgnWallet(tier1WalletId, '5000000.0000');
 
@@ -223,6 +263,46 @@ describe('NGN localization (integration)', () => {
         'test_actor',
       ),
     ).rejects.toThrow('exceeds per-transaction limit');
+  });
+
+  it('concurrent NIP_TRANSFERs from the same Tier-1 wallet never jointly exceed the seeded daily limit (regression test for the TransactionLimitService TOCTOU fix)', async () => {
+    await fundNgnWallet(tier1WalletId, '5000000.0000');
+
+    // Seeded TIER_1 maxPerDay = 50000.0000. Each transfer's full debit
+    // (amount + fee + stamp duty + VAT + levy) = 20079.8960, so two can
+    // post (40159.7920 total) but a third must be rejected — before the
+    // fix, concurrent requests could all read "0 posted today" before any
+    // committed and all three could pass.
+    const attempts = [1, 2, 3].map((n) =>
+      transactions.process(
+        {
+          type: 'NIP_TRANSFER',
+          effectiveDate: new Date().toISOString(),
+          payload: {
+            senderWalletId: tier1WalletId,
+            recipientWalletId: recipientNgnWalletId,
+            feeRevenueAccountId: feeRevenueId,
+            amount: '20000.0000',
+            currency: 'NGN',
+          },
+        },
+        'test_actor',
+        `nip-idem-concurrent-${n.toString()}-${uuidv7()}`,
+        'test_actor',
+      ),
+    );
+
+    const results = await Promise.allSettled(attempts);
+    const fulfilled = results.filter((r) => r.status === 'fulfilled');
+    const rejected = results.filter((r) => r.status === 'rejected');
+
+    expect(fulfilled.length).toBe(2);
+    expect(rejected.length).toBe(1);
+    const rejectedReason = (rejected[0] as PromiseRejectedResult).reason as Error;
+    expect(rejectedReason.message).toContain('would exceed daily limit');
+
+    const tb = await trialBalance.generate();
+    expect(tb.isBalanced).toBe(true);
   });
 
   it('allows an equivalent transfer from a Tier-3 account (no configured limit)', async () => {

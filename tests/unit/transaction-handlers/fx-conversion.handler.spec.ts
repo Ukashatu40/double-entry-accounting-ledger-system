@@ -159,4 +159,18 @@ describe('FxConversionHandler', () => {
       expect(plugLine?.amount).toBe('83.5000');
     });
   });
+
+  describe('getLimitCheckSpecs', () => {
+    it('checks the source wallet against sourceAmount', () => {
+      const result = (
+        handler as unknown as {
+          getLimitCheckSpecs: (
+            p: Record<string, unknown>,
+            a: Record<string, Account>,
+          ) => { accountId: string; amount: string }[];
+        }
+      ).getLimitCheckSpecs({ sourceAmount: '100.0000' }, accounts);
+      expect(result).toEqual([{ accountId: 'src-id', amount: '100.0000' }]);
+    });
+  });
 });

@@ -9,7 +9,7 @@
  * Stored under Account.metadata.kycTier (see AccountMetadata below) — this
  * is a classification used only at account-provisioning time to decide
  * which TransactionLimit rows to create for an account. Runtime enforcement
- * always reads TransactionLimit (src/transactions/transaction-limit.service.ts),
+ * always reads TransactionLimit (src/ledger/transaction-limit.service.ts),
  * never this enum directly.
  */
 export enum KycTier {

@@ -106,4 +106,21 @@ describe('LoanEmiPaymentHandler', () => {
       assertAssetAccountMoves(dto.lines, 'loan-id', 'decrease');
     });
   });
+
+  describe('getLimitCheckSpecs', () => {
+    it('checks the wallet against the total EMI (principal + interest)', () => {
+      const result = (
+        handler as unknown as {
+          getLimitCheckSpecs: (
+            p: Record<string, unknown>,
+            a: Record<string, Account>,
+          ) => { accountId: string; amount: string }[];
+        }
+      ).getLimitCheckSpecs(
+        { principalComponent: '8000.0000', interestComponent: '1603.0000' },
+        accounts,
+      );
+      expect(result).toEqual([{ accountId: 'wallet-id', amount: '9603.0000' }]);
+    });
+  });
 });

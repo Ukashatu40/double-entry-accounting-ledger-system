@@ -5,10 +5,23 @@ import { LedgerService } from './ledger.service';
 import { LedgerRepository } from './ledger.repository';
 import { HashChainService } from './hash-chain.service';
 import { BalanceService } from './balance.service';
+import { TransactionLimitService } from './transaction-limit.service';
 
 @Module({
   controllers: [LedgerController],
-  providers: [LedgerService, LedgerRepository, HashChainService, BalanceService],
-  exports: [LedgerService, LedgerRepository, HashChainService, BalanceService],
+  providers: [
+    LedgerService,
+    LedgerRepository,
+    HashChainService,
+    BalanceService,
+    TransactionLimitService,
+  ],
+  exports: [
+    LedgerService,
+    LedgerRepository,
+    HashChainService,
+    BalanceService,
+    TransactionLimitService,
+  ],
 })
 export class LedgerModule {}

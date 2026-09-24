@@ -61,6 +61,17 @@ export class FxConversionHandler extends BaseTransactionHandler {
     return true;
   }
 
+  protected getLimitCheckSpecs(
+    payload: Record<string, unknown>,
+    accounts: Record<string, Account>,
+  ): { accountId: string; amount: string }[] {
+    const sourceWallet = accounts['sourceWallet'];
+    if (!sourceWallet) return [];
+
+    const sourceAmount = new Decimal(String(payload['sourceAmount'] ?? '0')).toFixed(4);
+    return [{ accountId: sourceWallet.id, amount: sourceAmount }];
+  }
+
   protected buildJournalEntry(
     transactionId: string,
     payload: Record<string, unknown>,

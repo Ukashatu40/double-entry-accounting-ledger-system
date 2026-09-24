@@ -28,6 +28,8 @@ describe('UssdTransferHandler', () => {
     recipientWallet: makeAccount({ id: 'recipient-id' }),
     feeRevenue: makeAccount({ id: 'fee-id', type: 'REVENUE', currency: 'INR' }),
     stampDutyPayable: makeAccount({ id: 'stamp-duty-id', type: 'LIABILITY', code: '2041' }),
+    vatPayable: makeAccount({ id: 'vat-id', type: 'LIABILITY', code: '2040' }),
+    cybersecurityLevyPayable: makeAccount({ id: 'levy-id', type: 'LIABILITY', code: '2042' }),
     platformOperatingCash: makeAccount({ id: 'platform-id', currency: 'INR' }),
   };
 
@@ -84,14 +86,42 @@ describe('UssdTransferHandler', () => {
       assertJournalBalanced(dto.lines);
       assertAssetAccountMoves(dto.lines, 'sender-id', 'decrease');
       assertAssetAccountMoves(dto.lines, 'recipient-id', 'increase');
+
+      // sender debit = amount(5000) + fee(10) + vat(0.75) + levy(0.25) = 5011.0000
+      const senderLine = dto.lines.find((l) => l.accountId === 'sender-id');
+      expect(senderLine?.amount).toBe('5011.0000');
     });
 
-    it('adds the ₦50 Stamp Duty Payable line for amounts at or above ₦10,000', () => {
+    it('adds the ₦50 Stamp Duty Payable line for amounts at or above ₦10,000, alongside VAT and the cybersecurity levy', () => {
       const dto = build({ amount: '15000.0000', currency: 'NGN' });
       assertJournalBalanced(dto.lines);
       const stampDutyLine = dto.lines.find((l) => l.accountId === 'stamp-duty-id');
       expect(stampDutyLine?.entryType).toBe('CREDIT');
       expect(stampDutyLine?.amount).toBe('50.0000');
+
+      const vatLine = dto.lines.find((l) => l.accountId === 'vat-id');
+      expect(vatLine?.amount).toBe('0.7500'); // 7.5% of fee 10.0000
+
+      const levyLine = dto.lines.find((l) => l.accountId === 'levy-id');
+      expect(levyLine?.amount).toBe('0.7500'); // 0.005% of amount 15000
+
+      // sender debit = 15000 + 10 + 50 + 0.75 + 0.75 = 15061.5000
+      const senderLine = dto.lines.find((l) => l.accountId === 'sender-id');
+      expect(senderLine?.amount).toBe('15061.5000');
+    });
+  });
+
+  describe('getLimitCheckSpecs', () => {
+    it('checks the sender wallet against the same total used in buildJournalEntry', () => {
+      const result = (
+        handler as unknown as {
+          getLimitCheckSpecs: (
+            p: Record<string, unknown>,
+            a: Record<string, Account>,
+          ) => { accountId: string; amount: string }[];
+        }
+      ).getLimitCheckSpecs({ amount: '15000.0000', currency: 'NGN' }, accounts);
+      expect(result).toEqual([{ accountId: 'sender-id', amount: '15061.5000' }]);
     });
   });
 });

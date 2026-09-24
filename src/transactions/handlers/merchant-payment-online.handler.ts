@@ -74,6 +74,20 @@ export class MerchantPaymentOnlineHandler extends BaseTransactionHandler {
     return true;
   }
 
+  protected getLimitCheckSpecs(
+    payload: Record<string, unknown>,
+    accounts: Record<string, Account>,
+  ): { accountId: string; amount: string }[] {
+    const wallet = accounts['wallet'];
+    if (!wallet) return [];
+
+    const amount = parseFloat(String(payload['amount'] ?? '0'));
+    const platformFee = parseFloat(this.calculatePlatformFee(amount));
+    const totalDebit = (amount + platformFee).toFixed(4);
+
+    return [{ accountId: wallet.id, amount: totalDebit }];
+  }
+
   protected buildJournalEntry(
     transactionId: string,
     payload: Record<string, unknown>,

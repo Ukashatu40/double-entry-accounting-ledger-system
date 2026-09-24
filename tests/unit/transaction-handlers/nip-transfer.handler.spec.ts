@@ -28,6 +28,8 @@ describe('NipTransferHandler', () => {
     recipientWallet: makeAccount({ id: 'recipient-id' }),
     feeRevenue: makeAccount({ id: 'fee-id', type: 'REVENUE', currency: 'INR' }),
     stampDutyPayable: makeAccount({ id: 'stamp-duty-id', type: 'LIABILITY', code: '2041' }),
+    vatPayable: makeAccount({ id: 'vat-id', type: 'LIABILITY', code: '2040' }),
+    cybersecurityLevyPayable: makeAccount({ id: 'levy-id', type: 'LIABILITY', code: '2042' }),
     platformOperatingCash: makeAccount({ id: 'platform-id', currency: 'INR' }),
   };
 
@@ -127,11 +129,23 @@ describe('NipTransferHandler', () => {
       ).buildJournalEntry('txn-1', payload, accounts);
     }
 
-    it('produces a fully balanced journal entry when the amount is below the stamp duty threshold', () => {
+    it('produces a fully balanced journal entry below the stamp duty threshold, with VAT and cybersecurity levy still applied', () => {
       const dto = build({ amount: '5000.0000', currency: 'NGN' });
       assertJournalBalanced(dto.lines);
       const stampDutyLine = dto.lines.find((l) => l.accountId === 'stamp-duty-id');
       expect(stampDutyLine).toBeUndefined();
+
+      const vatLine = dto.lines.find((l) => l.accountId === 'vat-id');
+      expect(vatLine?.entryType).toBe('CREDIT');
+      expect(vatLine?.amount).toBe('2.0160'); // 7.5% of fee 26.8800
+
+      const levyLine = dto.lines.find((l) => l.accountId === 'levy-id');
+      expect(levyLine?.entryType).toBe('CREDIT');
+      expect(levyLine?.amount).toBe('0.2500'); // 0.005% of amount 5000
+
+      // sender debit = amount(5000) + fee(26.88) + vat(2.016) + levy(0.25) = 5029.1460
+      const senderLine = dto.lines.find((l) => l.accountId === 'sender-id');
+      expect(senderLine?.amount).toBe('5029.1460');
     });
 
     it('DECREASES the sender wallet and INCREASES the recipient wallet', () => {
@@ -147,9 +161,9 @@ describe('NipTransferHandler', () => {
       expect(stampDutyLine?.entryType).toBe('CREDIT');
       expect(stampDutyLine?.amount).toBe('50.0000');
 
-      // sender debit = amount(10000) + fee(26.88) + stampDuty(50) = 10076.8800
+      // sender debit = amount(10000) + fee(26.88) + stampDuty(50) + vat(2.016) + levy(0.5) = 10079.3960
       const senderLine = dto.lines.find((l) => l.accountId === 'sender-id');
-      expect(senderLine?.amount).toBe('10076.8800');
+      expect(senderLine?.amount).toBe('10079.3960');
     });
 
     it('omits the Stamp Duty Payable line just below the ₦10,000 threshold', () => {
@@ -157,6 +171,9 @@ describe('NipTransferHandler', () => {
       assertJournalBalanced(dto.lines);
       const stampDutyLine = dto.lines.find((l) => l.accountId === 'stamp-duty-id');
       expect(stampDutyLine).toBeUndefined();
+
+      const senderLine = dto.lines.find((l) => l.accountId === 'sender-id');
+      expect(senderLine?.amount).toBe('10029.3959');
     });
 
     it('plugs the residual on platformOperatingCash (see ADR-007)', () => {
@@ -164,6 +181,20 @@ describe('NipTransferHandler', () => {
       const plugLine = dto.lines.find((l) => l.accountId === 'platform-id');
       expect(plugLine).toBeDefined();
       assertJournalBalanced(dto.lines);
+    });
+  });
+
+  describe('getLimitCheckSpecs', () => {
+    it('checks the sender wallet against the same total used in buildJournalEntry', () => {
+      const result = (
+        handler as unknown as {
+          getLimitCheckSpecs: (
+            p: Record<string, unknown>,
+            a: Record<string, Account>,
+          ) => { accountId: string; amount: string }[];
+        }
+      ).getLimitCheckSpecs({ amount: '10000.0000', currency: 'NGN' }, accounts);
+      expect(result).toEqual([{ accountId: 'sender-id', amount: '10079.3960' }]);
     });
   });
 });

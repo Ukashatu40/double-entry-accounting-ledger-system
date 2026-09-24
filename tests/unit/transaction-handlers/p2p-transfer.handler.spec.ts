@@ -122,4 +122,19 @@ describe('P2pTransferHandler', () => {
       expect(senderLine?.entryType).toBe('CREDIT');
     });
   });
+
+  describe('getLimitCheckSpecs', () => {
+    it('checks the sender wallet against amount + fee (retrofit proving TransactionLimitService is generic, not NGN-only)', () => {
+      const result = (
+        handler as unknown as {
+          getLimitCheckSpecs: (
+            p: Record<string, unknown>,
+            a: Record<string, Account>,
+          ) => { accountId: string; amount: string }[];
+        }
+      ).getLimitCheckSpecs({ amount: '5000.0000' }, accounts);
+      // 5000 + 10 (TRANSFER_FEE) = 5010.0000
+      expect(result).toEqual([{ accountId: 'sender-id', amount: '5010.0000' }]);
+    });
+  });
 });

@@ -8,7 +8,6 @@ import {
 import { LedgerService } from '@ledger/ledger.service';
 import { AccountsRepository } from '@accounts/accounts.repository';
 import { IdempotencyService } from './idempotency.service';
-import { TransactionLimitService } from './transaction-limit.service';
 import { DepositBankHandler } from './handlers/deposit-bank.handler';
 import { WithdrawalHandler } from './handlers/withdrawal.handler';
 import { P2pTransferHandler } from './handlers/p2p-transfer.handler';
@@ -52,7 +51,6 @@ export class TransactionsService {
     private readonly ledger: LedgerService,
     private readonly accounts: AccountsRepository,
     private readonly idempotency: IdempotencyService,
-    private readonly limits: TransactionLimitService,
     private readonly fxConversionHandler: FxConversionHandler, // ← DI-injected
   ) {
     this.handlers = {
@@ -126,7 +124,6 @@ export class TransactionsService {
       const ctx: TransactionContext = {
         ledger: this.ledger,
         accounts: this.accounts,
-        limits: this.limits,
         actor,
       };
       if (idempotencyKey !== undefined) ctx.idempotencyKey = idempotencyKey;

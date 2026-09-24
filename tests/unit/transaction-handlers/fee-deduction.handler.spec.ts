@@ -81,4 +81,18 @@ describe('FeeDeductionHandler', () => {
       assertAssetAccountMoves(dto.lines, 'wallet-id', 'decrease');
     });
   });
+
+  describe('getLimitCheckSpecs', () => {
+    it('checks the wallet against the fee amount', () => {
+      const result = (
+        handler as unknown as {
+          getLimitCheckSpecs: (
+            p: Record<string, unknown>,
+            a: Record<string, Account>,
+          ) => { accountId: string; amount: string }[];
+        }
+      ).getLimitCheckSpecs({ amount: '50.0000' }, accounts);
+      expect(result).toEqual([{ accountId: 'wallet-id', amount: '50.0000' }]);
+    });
+  });
 });

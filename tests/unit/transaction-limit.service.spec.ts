@@ -1,5 +1,5 @@
 // tests/unit/transaction-limit.service.spec.ts
-import { TransactionLimitService } from '@transactions/transaction-limit.service';
+import { TransactionLimitService } from '@ledger/transaction-limit.service';
 import { DatabaseService } from '@database/database.service';
 import Decimal from 'decimal.js';
 

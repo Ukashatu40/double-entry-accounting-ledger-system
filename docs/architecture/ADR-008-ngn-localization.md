@@ -55,32 +55,53 @@ new handlers) is the correct scope: `TransactionLimitService`
 wired into `BaseTransactionHandler` via a new opt-in hook,
 `getLimitCheckSpecs()`, called from `execute()` before posting — the same
 opt-in shape as the pre-existing `getBalanceCheckAccounts()`. It is
-overridden by `NipTransferHandler`, `UssdTransferHandler`, and — to prove
-the mechanism is genuinely generic — `P2pTransferHandler` as one retrofit
-example. Extending it to the remaining 17 handlers is a mechanical,
-one-line-per-handler follow-up, intentionally left out of this change to
-keep the diff reviewable.
+overridden by every handler that already had a `getBalanceCheckAccounts()`
+debit-side account to protect — `NipTransferHandler`, `UssdTransferHandler`,
+`P2pTransferHandler`, `BillPaymentHandler`, `FeeDeductionHandler`,
+`FxConversionHandler`, `LoanEmiPaymentHandler`,
+`MerchantPaymentOnlineHandler`, `MerchantPaymentQrHandler`, and
+`WithdrawalHandler` — ten handlers in total. The remaining handlers
+(deposits, interest accrual/payout, cashback, promotional credit, loan
+disbursement, reversals, chargeback, reward redemption) are funding or
+credit transactions with no customer-initiated wallet debit and, matching
+this codebase's own existing judgment via `getBalanceCheckAccounts()`
+already returning `[]` for those, were left without a limit check — a spend
+cap is not a meaningful concept for money moving *into* an account.
 
-Known limitation, documented rather than fixed here: the day/month
-aggregate check in `TransactionLimitService.assertWithinLimits()` has its
-own check-then-act window — structurally the same class of bug as the
-refund TOCTOU fixed in `reversals.service.ts` (see ADR context in that
-file), but for spend limits rather than refunds. A future pass should
-thread this check into `LedgerService.postJournalEntry()`'s existing
-advisory-locked transaction rather than checking before that lock is taken.
+The day/month aggregate check in `TransactionLimitService.assertWithinLimits()`
+originally had its own check-then-act window — the same class of TOCTOU bug
+fixed for refunds in `reversals.service.ts`, but for spend limits. This has
+since been closed: `LedgerService.postJournalEntry()` accepts a
+`limitChecks` option and runs `assertWithinLimits()` (now `tx`-aware)
+*inside* the same advisory-locked transaction it already uses for balance
+checks, acquiring locks on the union of both sets of accounts.
+`BaseTransactionHandler.execute()` passes `getLimitCheckSpecs()`'s output
+straight through rather than pre-checking it itself. `TransactionLimitService`
+now lives in `src/ledger/` rather than `src/transactions/`, purely so
+`LedgerService` can inject it without `TransactionsModule` ↔ `LedgerModule`
+becoming a cycle (`TransactionsModule` already imports `LedgerModule`, so it
+still gets the same instance). Verified under real concurrent load in
+`tests/integration/ngn-localization.spec.ts` — three concurrent
+`NIP_TRANSFER`s against a Tier-1 wallet's seeded daily cap, where exactly
+two succeed and the third is rejected, every run.
 
-**4. Stamp Duty reuses the ADR-007 balancing-leg pattern; VAT and the CBN
-Cybersecurity Levy are seeded but not wired.** Nigeria's Finance Act flat
-₦50 stamp duty on electronic transfers ≥ ₦10,000
-(`src/transactions/handlers/stamp-duty.util.ts`) is modeled as an
-additional `computeBalancingLeg()`-compatible journal leg — the same
-mechanism `p2p-transfer.handler.ts` and the other ADR-007-pattern handlers
-already use for fee-splitting, extended to a third real-money leg. VAT
-Payable (7.5%, account `2040`) and the CBN Cybersecurity Levy (0.005%,
-account `2042`) were added to the Chart of Accounts in this change but are
-**not** wired into any handler — they exist as CoA entries with a
-documented extension path, not as functioning code. Do not assume either
-is enforced anywhere.
+**4. Stamp Duty, VAT, and the CBN Cybersecurity Levy all reuse the ADR-007
+balancing-leg pattern.** Nigeria's Finance Act flat ₦50 stamp duty on
+electronic transfers ≥ ₦10,000 (`src/transactions/handlers/stamp-duty.util.ts`),
+7.5% VAT on the transaction fee, and the 0.005% CBN Cybersecurity Levy on
+the transaction amount (both in `src/transactions/handlers/nigeria-levies.util.ts`)
+are each modeled as an additional `computeBalancingLeg()`-compatible
+journal leg — the same mechanism `p2p-transfer.handler.ts` and the other
+ADR-007-pattern handlers already use for fee-splitting, extended here to
+three real-money legs instead of one. All three post to their own CoA
+liability accounts (`2041` Stamp Duty Payable, `2040` VAT Payable, `2042`
+CBN Cybersecurity Levy Payable) on both `NIP_TRANSFER` and
+`USSD_TRANSFER`. Unlike stamp duty, VAT and the levy are unconditional for
+any NGN transaction on these two handlers (no threshold), since both are
+percentage-based and never round to exactly zero for a positive amount —
+the `.gt(0)` guard on each still exists so the same `computeVat()`/
+`computeCybersecurityLevy()` functions stay safe to reuse on a
+non-NGN-only handler in the future.
 
 ## Consequences
 

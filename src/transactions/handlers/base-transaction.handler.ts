@@ -1,10 +1,8 @@
 // src/transactions/handlers/base-transaction.handler.ts
 import { UnprocessableEntityException } from '@nestjs/common';
 import { uuidv7 } from 'uuidv7';
-import { toDecimal } from '@common/types/money.type';
 import type { LedgerService, PostedJournal } from '@ledger/ledger.service';
 import type { AccountsRepository } from '@accounts/accounts.repository';
-import type { TransactionLimitService } from '../transaction-limit.service';
 import type { TransactionType, Account } from '@prisma/client';
 import type { CreateJournalEntryDto } from '@ledger/dto/create-journal-entry.dto';
 
@@ -15,7 +13,6 @@ import type { CreateJournalEntryDto } from '@ledger/dto/create-journal-entry.dto
 export interface TransactionContext {
   ledger: LedgerService;
   accounts: AccountsRepository;
-  limits: TransactionLimitService;
   actor: string;
   idempotencyKey?: string; // was: idempotencyKey: string — must be optional
 }
@@ -118,9 +115,14 @@ export abstract class BaseTransactionHandler {
    * this transaction posts, and the amount to check against for each (e.g.
    * [{ accountId: senderWallet.id, amount: totalDebit }]). Opt-in and empty
    * by default — non-breaking for every handler that doesn't override it.
-   * Checked via TransactionLimitService.assertWithinLimits(), which is a
-   * no-op when no TransactionLimit row exists for that account+type, so
-   * overriding this is safe even for accounts with no configured limit.
+   * Passed straight through to LedgerService.postJournalEntry()'s
+   * `limitChecks` option, which runs TransactionLimitService.assertWithinLimits()
+   * INSIDE the same advisory-locked transaction as the balance check (see
+   * that method's doc comment) rather than as a separate pre-check — this
+   * closes the same class of TOCTOU race fixed for refunds in
+   * reversals.service.ts. A no-op when no TransactionLimit row exists for
+   * that account+type, so overriding this is safe even for accounts with no
+   * configured limit.
    */
   protected getLimitCheckSpecs(
     _payload: Record<string, unknown>,
@@ -157,17 +159,14 @@ export abstract class BaseTransactionHandler {
 
     const dto = this.buildJournalEntry(transactionId, payload, accountMap);
     const balanceCheckAccounts = this.getBalanceCheckAccounts(payload, accountMap);
-
-    for (const spec of this.getLimitCheckSpecs(payload, accountMap)) {
-      await ctx.limits.assertWithinLimits(
-        spec.accountId,
-        dto.referenceType,
-        toDecimal(spec.amount),
-      );
-    }
+    const limitChecks = this.getLimitCheckSpecs(payload, accountMap).map((spec) => ({
+      ...spec,
+      transactionType: dto.referenceType,
+    }));
 
     const journal = await ctx.ledger.postJournalEntry(dto, ctx.actor, ctx.idempotencyKey, {
       checkBalanceOn: balanceCheckAccounts,
+      limitChecks,
     });
 
     return { transactionId, type: dto.referenceType, journal };

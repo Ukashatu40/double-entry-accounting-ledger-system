@@ -1,9 +1,10 @@
-// src/transactions/transaction-limit.service.ts
+// src/ledger/transaction-limit.service.ts
 import { Injectable, UnprocessableEntityException } from '@nestjs/common';
 import Decimal from 'decimal.js';
 import { DatabaseService } from '@database/database.service';
+import type { TransactionClient } from '@database/database.service';
 import { toDecimal } from '@common/types/money.type';
-import type { TransactionType } from '@prisma/client';
+import type { TransactionType, PrismaClient } from '@prisma/client';
 
 interface SumRow {
   total: string | null;
@@ -18,15 +19,19 @@ interface SumRow {
  * handler via BaseTransactionHandler.getLimitCheckSpecs() — see that
  * file's doc comment for the wiring contract.
  *
- * KNOWN LIMITATION (documented, not fixed here — out of scope for this
- * change, which targets the 4 confirmed bugs plus NGN localization): the
- * day/month aggregate check below has its own check-then-act window,
- * structurally like the refund TOCTOU bug fixed in reversals.service.ts,
- * but for spend limits rather than refunds. A future hardening pass should
- * thread this check into LedgerService.postJournalEntry()'s existing
- * advisory-locked transaction (piggybacking on the same per-account lock
- * already acquired there for balance checks) rather than checking before
- * that lock is taken.
+ * Lives in src/ledger/ (not src/transactions/, despite being consumed
+ * there) so LedgerService can inject it directly without TransactionsModule
+ * ↔ LedgerModule becoming a cycle — TransactionsModule already imports
+ * LedgerModule, so this way both get it from the same place.
+ *
+ * CONCURRENCY: the day/month aggregate check requires a `tx` (see
+ * LedgerService.postJournalEntry(), which calls this from inside its own
+ * advisory-locked transaction) to avoid the exact TOCTOU shape fixed for
+ * refunds in reversals.service.ts — two concurrent transactions against the
+ * same account+type could otherwise both read the same "already posted"
+ * total before either commits, and both pass. Without a `tx` (the default),
+ * the check runs unguarded against `this.db` — acceptable only for callers
+ * that don't need the stronger guarantee, or that provide their own locking.
  */
 @Injectable()
 export class TransactionLimitService {
@@ -36,8 +41,11 @@ export class TransactionLimitService {
     accountId: string,
     transactionType: TransactionType,
     amount: Decimal,
+    tx?: TransactionClient,
   ): Promise<void> {
-    const limit = await this.db.transactionLimit.findUnique({
+    const client = (tx ?? this.db) as unknown as PrismaClient;
+
+    const limit = await client.transactionLimit.findUnique({
       where: { accountId_transactionType: { accountId, transactionType } },
     });
 
@@ -50,7 +58,7 @@ export class TransactionLimitService {
     }
 
     if (limit.maxPerDay !== null) {
-      const todayTotal = await this.sumPostedAmount(accountId, transactionType, startOfDay());
+      const todayTotal = await this.sumPostedAmount(accountId, transactionType, startOfDay(), tx);
       const projected = todayTotal.plus(amount);
       if (projected.gt(toDecimal(limit.maxPerDay.toString()))) {
         throw new UnprocessableEntityException(
@@ -61,7 +69,7 @@ export class TransactionLimitService {
     }
 
     if (limit.maxPerMonth !== null) {
-      const monthTotal = await this.sumPostedAmount(accountId, transactionType, startOfMonth());
+      const monthTotal = await this.sumPostedAmount(accountId, transactionType, startOfMonth(), tx);
       const projected = monthTotal.plus(amount);
       if (projected.gt(toDecimal(limit.maxPerMonth.toString()))) {
         throw new UnprocessableEntityException(
@@ -76,8 +84,10 @@ export class TransactionLimitService {
     accountId: string,
     transactionType: TransactionType,
     since: Date,
+    tx?: TransactionClient,
   ): Promise<Decimal> {
-    const rows = await this.db.$queryRaw<SumRow[]>`
+    const client = (tx ?? this.db) as unknown as PrismaClient;
+    const rows = await client.$queryRaw<SumRow[]>`
       SELECT COALESCE(SUM(amount), 0)::TEXT AS total
       FROM ledger_entries
       WHERE account_id = ${accountId}

@@ -60,6 +60,20 @@ export class LoanEmiPaymentHandler extends BaseTransactionHandler {
     return true;
   }
 
+  protected getLimitCheckSpecs(
+    payload: Record<string, unknown>,
+    accounts: Record<string, Account>,
+  ): { accountId: string; amount: string }[] {
+    const wallet = accounts['wallet'];
+    if (!wallet) return [];
+
+    const principal = new Decimal(String(payload['principalComponent'] ?? '0'));
+    const interest = new Decimal(String(payload['interestComponent'] ?? '0'));
+    const totalEmi = principal.plus(interest).toFixed(4);
+
+    return [{ accountId: wallet.id, amount: totalEmi }];
+  }
+
   protected buildJournalEntry(
     transactionId: string,
     payload: Record<string, unknown>,

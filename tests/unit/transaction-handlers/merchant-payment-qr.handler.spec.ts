@@ -114,4 +114,19 @@ describe('MerchantPaymentQrHandler', () => {
       assertAssetAccountMoves(dto.lines, 'merchant-id', 'increase');
     });
   });
+
+  describe('getLimitCheckSpecs', () => {
+    it('checks the wallet against amount + fee', () => {
+      const result = (
+        handler as unknown as {
+          getLimitCheckSpecs: (
+            p: Record<string, unknown>,
+            a: Record<string, Account>,
+          ) => { accountId: string; amount: string }[];
+        }
+      ).getLimitCheckSpecs({ amount: '1000.0000' }, accounts);
+      // 1000 + max(1000*0.005, 1) = 1000 + 5 = 1005.0000
+      expect(result).toEqual([{ accountId: 'wallet-id', amount: '1005.0000' }]);
+    });
+  });
 });

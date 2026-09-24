@@ -1,5 +1,6 @@
 // src/transactions/handlers/fee-deduction.handler.ts
 import { Injectable, UnprocessableEntityException } from '@nestjs/common';
+import Decimal from 'decimal.js';
 import { BaseTransactionHandler } from './base-transaction.handler';
 import { computeBalancingLeg } from './balancing-leg.util';
 import type { Account } from '@prisma/client';
@@ -47,6 +48,17 @@ export class FeeDeductionHandler extends BaseTransactionHandler {
 
   protected requiresPlatformOperatingCash(): boolean {
     return true;
+  }
+
+  protected getLimitCheckSpecs(
+    payload: Record<string, unknown>,
+    accounts: Record<string, Account>,
+  ): { accountId: string; amount: string }[] {
+    const wallet = accounts['wallet'];
+    if (!wallet) return [];
+
+    const amount = new Decimal(String(payload['amount'] ?? '0')).toFixed(4);
+    return [{ accountId: wallet.id, amount }];
   }
 
   protected buildJournalEntry(

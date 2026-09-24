@@ -4,6 +4,7 @@ import Decimal from 'decimal.js';
 import { BaseTransactionHandler } from './base-transaction.handler';
 import { computeBalancingLeg } from './balancing-leg.util';
 import { computeStampDuty } from './stamp-duty.util';
+import { computeVat, computeCybersecurityLevy } from './nigeria-levies.util';
 import { requireSupportedCurrency } from './payload-validation.util';
 import type { Account } from '@prisma/client';
 import type { CreateJournalEntryDto } from '@ledger/dto/create-journal-entry.dto';
@@ -62,7 +63,7 @@ export class UssdTransferHandler extends BaseTransactionHandler {
   }
 
   protected additionalSystemAccounts(): Record<string, string> {
-    return { stampDutyPayable: '2041' };
+    return { stampDutyPayable: '2041', vatPayable: '2040', cybersecurityLevyPayable: '2042' };
   }
 
   protected getLimitCheckSpecs(
@@ -74,9 +75,12 @@ export class UssdTransferHandler extends BaseTransactionHandler {
 
     const amount = new Decimal(String(payload['amount'] ?? '0'));
     const currency = String(payload['currency'] ?? 'NGN');
+    const fee = new Decimal(UssdTransferHandler.USSD_FEE);
     const totalDebit = amount
-      .plus(UssdTransferHandler.USSD_FEE)
+      .plus(fee)
       .plus(computeStampDuty(amount, currency))
+      .plus(computeVat(fee, currency))
+      .plus(computeCybersecurityLevy(amount, currency))
       .toDecimalPlaces(4, Decimal.ROUND_HALF_UP)
       .toFixed(4);
 
@@ -92,6 +96,8 @@ export class UssdTransferHandler extends BaseTransactionHandler {
     const recipientWallet = this.requireAccount(accounts, 'recipientWallet');
     const feeRevenue = this.requireAccount(accounts, 'feeRevenue');
     const stampDutyPayable = this.requireAccount(accounts, 'stampDutyPayable');
+    const vatPayable = this.requireAccount(accounts, 'vatPayable');
+    const cybersecurityLevyPayable = this.requireAccount(accounts, 'cybersecurityLevyPayable');
     const platformCash = this.requireAccount(accounts, 'platformOperatingCash');
 
     const amount = new Decimal(String(payload['amount'] ?? '0'));
@@ -99,10 +105,14 @@ export class UssdTransferHandler extends BaseTransactionHandler {
     const effectiveDate = String(payload['effectiveDate'] ?? new Date().toISOString());
     const fee = new Decimal(UssdTransferHandler.USSD_FEE);
     const stampDuty = computeStampDuty(amount, currency);
+    const vat = computeVat(fee, currency);
+    const cybersecurityLevy = computeCybersecurityLevy(amount, currency);
 
     const totalDebit = amount
       .plus(fee)
       .plus(stampDuty)
+      .plus(vat)
+      .plus(cybersecurityLevy)
       .toDecimalPlaces(4, Decimal.ROUND_HALF_UP)
       .toFixed(4);
 
@@ -114,7 +124,9 @@ export class UssdTransferHandler extends BaseTransactionHandler {
         currency,
         narrative:
           `USSD transfer sent — amount ${amount.toFixed(4)} + fee ${fee.toFixed(4)}` +
-          (stampDuty.gt(0) ? ` + stamp duty ${stampDuty.toFixed(4)}` : ''),
+          (stampDuty.gt(0) ? ` + stamp duty ${stampDuty.toFixed(4)}` : '') +
+          (vat.gt(0) ? ` + VAT ${vat.toFixed(4)}` : '') +
+          (cybersecurityLevy.gt(0) ? ` + cybersecurity levy ${cybersecurityLevy.toFixed(4)}` : ''),
       },
       {
         accountId: recipientWallet.id,
@@ -138,6 +150,28 @@ export class UssdTransferHandler extends BaseTransactionHandler {
               amount: stampDuty.toFixed(4),
               currency,
               narrative: `USSD transfer — Finance Act stamp duty (₦50 on transfers ≥ ₦10,000)`,
+            },
+          ]
+        : []),
+      ...(vat.gt(0)
+        ? [
+            {
+              accountId: vatPayable.id,
+              entryType: 'CREDIT' as const,
+              amount: vat.toFixed(4),
+              currency,
+              narrative: `USSD transfer — VAT (7.5% of fee)`,
+            },
+          ]
+        : []),
+      ...(cybersecurityLevy.gt(0)
+        ? [
+            {
+              accountId: cybersecurityLevyPayable.id,
+              entryType: 'CREDIT' as const,
+              amount: cybersecurityLevy.toFixed(4),
+              currency,
+              narrative: `USSD transfer — CBN Cybersecurity Levy (0.005% of amount)`,
             },
           ]
         : []),

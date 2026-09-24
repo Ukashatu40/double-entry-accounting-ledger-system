@@ -7,9 +7,10 @@ import type { TransactionClient } from '@database/database.service';
 import { HashChainService } from './hash-chain.service';
 import { LedgerRepository } from './ledger.repository';
 import { BalanceService } from './balance.service';
+import { TransactionLimitService } from './transaction-limit.service';
 import { assertBalanced, toDecimal } from '@common/types/money.type';
 import type { CreateJournalEntryDto } from './dto/create-journal-entry.dto';
-import type { LedgerEntry } from '@prisma/client';
+import type { LedgerEntry, TransactionType } from '@prisma/client';
 
 export interface PostedJournal {
   journalId: string;
@@ -28,6 +29,7 @@ export class LedgerService {
     private readonly hashChain: HashChainService,
     private readonly repo: LedgerRepository,
     private readonly balance: BalanceService,
+    private readonly limits: TransactionLimitService,
   ) {}
 
   /**
@@ -57,6 +59,14 @@ export class LedgerService {
       // Leave empty for funding transactions (deposits, loan disbursements).
       // Provide debit account IDs for spending transactions (withdrawals, payments).
       checkBalanceOn?: string[];
+      // Account+type spend caps to enforce before posting, checked INSIDE
+      // the same advisory-locked transaction as the balance check below —
+      // this is what closes the TOCTOU window TransactionLimitService would
+      // otherwise have on its own (see that file's doc comment): two
+      // concurrent posts against the same account+type now genuinely
+      // serialize on the advisory lock instead of both reading the same
+      // "already posted today" total before either commits.
+      limitChecks?: { accountId: string; transactionType: TransactionType; amount: string }[];
       // An existing transaction client to post into, instead of opening a new
       // one. Use this when the caller owns a wider transaction boundary that
       // must commit/rollback atomically with this journal post (e.g. a
@@ -93,6 +103,12 @@ export class LedgerService {
 
     // Only lock and check balance on explicitly specified accounts
     const balanceCheckAccountIds = options?.checkBalanceOn ?? [];
+    const limitChecks = options?.limitChecks ?? [];
+    // Union: any account needing a balance check OR a limit check gets
+    // locked, so the limit check below is genuinely serialized too.
+    const lockAccountIds = [
+      ...new Set([...balanceCheckAccountIds, ...limitChecks.map((c) => c.accountId)]),
+    ];
 
     // NOTE: `entries` is built fresh inside `run` (not accumulated in an
     // outer-scoped array) so that if withRetryTransaction retries this
@@ -102,9 +118,10 @@ export class LedgerService {
     const run = async (tx: TransactionClient): Promise<LedgerEntry[]> => {
       const entries: LedgerEntry[] = [];
 
-      // Acquire advisory locks only on accounts we need to balance-check
-      if (balanceCheckAccountIds.length > 0) {
-        await this.db.acquireAdvisoryLocks(tx, balanceCheckAccountIds);
+      // Acquire advisory locks on every account we need to balance-check
+      // and/or limit-check
+      if (lockAccountIds.length > 0) {
+        await this.db.acquireAdvisoryLocks(tx, lockAccountIds);
       }
 
       // Check balance only on the specified accounts
@@ -121,6 +138,17 @@ export class LedgerService {
               `requested=${line.amountDecimal.toFixed(4)} ${line.currency}`,
           );
         }
+      }
+
+      // Check TransactionLimit caps, now serialized by the same advisory
+      // lock acquired above.
+      for (const check of limitChecks) {
+        await this.limits.assertWithinLimits(
+          check.accountId,
+          check.transactionType,
+          toDecimal(check.amount),
+          tx,
+        );
       }
 
       // Get last entry hash to continue the chain
