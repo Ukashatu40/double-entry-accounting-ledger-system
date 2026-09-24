@@ -12,16 +12,23 @@ Personal project — double-entry ledger engine with India + Nigeria market loca
 
 A production-grade financial ledger built on double-entry accounting principles with a cryptographic audit trail. Designed to the standards expected at Stripe, Revolut, Monzo, and similar fintech companies.
 
+**What this demonstrates:** double-entry correctness under a hostile test suite (a 1,000-transaction randomized stress test across all 22 types, verified for a balanced trial balance and an unbroken hash chain every run); real concurrency handling — not just sequential-looking async code, but advisory-locked transactions verified to correctly serialize genuinely concurrent requests (refunds, tiered spend limits) with `Promise.all`, not `await` in a loop; and an independently-modeled second market (Nigeria) built on the same architecture as the original India-flavored system, reusing its own established patterns (the ADR-007 balancing-leg mechanism) rather than bolting on special cases.
+
+A frontend for this API is planned next — see `docs/api/openapi.yaml` for the current API contract (regenerate with `npm run docs:openapi` after any handler/DTO change).
+
 **Key capabilities:**
 
-- 20 transaction types with correct debit/credit patterns
+- 22 transaction types with correct debit/credit patterns, including Nigeria's NIP (NIBSS Instant Payment) and USSD transfer rails
 - SHA-256 hash chain on every ledger entry (tamper-evident)
-- PostgreSQL advisory locks preventing double-spend
+- PostgreSQL advisory locks preventing double-spend, with concurrency correctness verified under real concurrent load (not just sequential tests)
 - `NUMERIC(19,4)` arithmetic throughout (zero floating point)
-- Multi-currency FX engine with stale-rate rejection
-- Full and partial reversals (3 fee policies)
+- Multi-currency FX engine (INR, USD, EUR, GBP, JPY, AED, SGD, NGN) with stale-rate rejection
+- Full and partial reversals (3 fee policies), with a TOCTOU-safe cumulative-refund guard
+- CBN-style tiered KYC transaction limits, enforced inside the same advisory-locked transaction as the balance check
+- Nigerian regulatory line items modeled as real journal legs: Finance Act stamp duty, VAT, CBN Cybersecurity Levy
 - Trial balance, income statement, balance sheet, and FX exposure reports
 - Idempotency on all state-mutating endpoints
+- Global API rate limiting
 
 ---
 
@@ -44,14 +51,17 @@ docker compose up postgres -d
 npx prisma migrate deploy
 npm run db:seed
 
-# 5. Apply immutability triggers, table partitioning, and the Platform
-#    Operating Cash system account (see docs/architecture/ADR-007)
+# 5. Apply immutability triggers, table partitioning, the Platform
+#    Operating Cash system account (ADR-007), and the NGN localization
+#    accounts (ADR-008)
 docker exec -i ledger_postgres psql -U ledger_user -d ledger_db \
   < database/triggers/003_immutability_triggers.sql
 docker exec -i ledger_postgres psql -U ledger_user -d ledger_db \
   < database/triggers/008_partition_ledger_entries.sql
 docker exec -i ledger_postgres psql -U ledger_user -d ledger_db \
   < database/triggers/010_add_platform_operating_cash_account.sql
+docker exec -i ledger_postgres psql -U ledger_user -d ledger_db \
+  < database/triggers/011_add_ngn_localization_accounts.sql
 
 # 6. Start the API
 npm run start:dev
@@ -72,9 +82,10 @@ npm run start:dev
 
 ```text
 src/
-├── accounts/       Chart of Accounts (26 accounts seeded)
-├── ledger/         Journal entry engine, hash chain, balance service
-├── transactions/   20 transaction type handlers + idempotency
+├── accounts/       Chart of Accounts (36 accounts seeded)
+├── ledger/         Journal entry engine, hash chain, balance service,
+│                   TransactionLimit enforcement (CBN-style tiered KYC caps)
+├── transactions/   22 transaction type handlers + idempotency
 ├── fx/             Exchange rate snapshots, stale-rate rejection
 ├── reversals/      Full and partial refunds, no-mutation principle
 ├── audit/          Hash chain verification, anomaly detection
@@ -82,7 +93,7 @@ src/
 └── common/         Guards, filters, decorators, money types
 ```
 
-**Tech stack:** NestJS 10 + Fastify | PostgreSQL 15 | Prisma 5 | decimal.js | UUID v7 | SHA-256
+**Tech stack:** NestJS 10 + Fastify | PostgreSQL 15 | Prisma 7 | decimal.js | UUID v7 | SHA-256 | @nestjs/throttler
 
 ---
 
