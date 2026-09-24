@@ -89,3 +89,15 @@ Documented as `database/triggers/010_add_platform_operating_cash_account.sql`
 (data migration — new account row, no schema/DDL change) — the "adding a new
 account type" migration referenced in spec A7.3's list of five required
 migration types.
+
+## Addendum (2026-09-24)
+
+A later code review found that `fx-conversion.handler.ts` had the identical
+class of bug (`fxRevenue` posted as `DEBIT` instead of `CREDIT`) but was not
+among the 13 handlers listed above — it predates this ADR's audit and slipped
+through because it doesn't share a code path with the other fee-splitting
+handlers. It has been fixed using the same `computeBalancingLeg()` +
+`requiresPlatformOperatingCash()` pattern and is now a 14th consumer of this
+ADR's decision. Any future handler review should re-check this handler list
+against `grep -rL requiresPlatformOperatingCash src/transactions/handlers/*.ts`
+rather than trusting the list above to stay exhaustive.

@@ -1,5 +1,6 @@
 // src/transactions/handlers/merchant-payment-qr.handler.ts
 import { Injectable, UnprocessableEntityException } from '@nestjs/common';
+import Decimal from 'decimal.js';
 import { BaseTransactionHandler } from './base-transaction.handler';
 import { computeBalancingLeg } from './balancing-leg.util';
 import type { Account } from '@prisma/client';
@@ -30,16 +31,16 @@ import type { CreateJournalEntryDto } from '@ledger/dto/create-journal-entry.dto
  */
 @Injectable()
 export class MerchantPaymentQrHandler extends BaseTransactionHandler {
-  private static readonly FEE_RATE = 0.005; // 0.5%
+  private static readonly FEE_RATE = new Decimal('0.005'); // 0.5%
   private static readonly MIN_FEE = '1.0000';
   private static readonly MAX_AMOUNT = '500000.0000';
 
-  private calculateFee(amount: number): string {
-    const fee = Math.max(
-      amount * MerchantPaymentQrHandler.FEE_RATE,
-      parseFloat(MerchantPaymentQrHandler.MIN_FEE),
+  private calculateFee(amount: Decimal): string {
+    const fee = Decimal.max(
+      amount.times(MerchantPaymentQrHandler.FEE_RATE),
+      new Decimal(MerchantPaymentQrHandler.MIN_FEE),
     );
-    return fee.toFixed(4);
+    return fee.toDecimalPlaces(4, Decimal.ROUND_HALF_UP).toFixed(4);
   }
 
   protected validateBusinessRules(
@@ -57,12 +58,12 @@ export class MerchantPaymentQrHandler extends BaseTransactionHandler {
       throw new UnprocessableEntityException(`Merchant settlement account is not active`);
     }
 
-    const amount = parseFloat(String(payload['amount'] ?? '0'));
-    if (amount <= 0) {
+    const amount = new Decimal(String(payload['amount'] ?? '0'));
+    if (amount.lte(0)) {
       throw new UnprocessableEntityException('Payment amount must be positive');
     }
 
-    if (amount > parseFloat(MerchantPaymentQrHandler.MAX_AMOUNT)) {
+    if (amount.gt(new Decimal(MerchantPaymentQrHandler.MAX_AMOUNT))) {
       throw new UnprocessableEntityException(
         `Amount exceeds QR payment limit of ${MerchantPaymentQrHandler.MAX_AMOUNT}`,
       );
@@ -85,14 +86,17 @@ export class MerchantPaymentQrHandler extends BaseTransactionHandler {
     const feeRevenue = this.requireAccount(accounts, 'feeRevenue');
     const platformCash = this.requireAccount(accounts, 'platformOperatingCash');
 
-    const amount = parseFloat(String(payload['amount'] ?? '0'));
+    const amount = new Decimal(String(payload['amount'] ?? '0'));
     const currency = String(payload['currency'] ?? 'INR');
     const effectiveDate = String(payload['effectiveDate'] ?? new Date().toISOString());
     const merchantName = String(payload['merchantName'] ?? 'Merchant');
     const qrRef = String(payload['qrReference'] ?? '');
 
     const fee = this.calculateFee(amount);
-    const totalDebit = (amount + parseFloat(fee)).toFixed(4);
+    const totalDebit = amount
+      .plus(new Decimal(fee))
+      .toDecimalPlaces(4, Decimal.ROUND_HALF_UP)
+      .toFixed(4);
     const amountStr = amount.toFixed(4);
 
     const realLines = [

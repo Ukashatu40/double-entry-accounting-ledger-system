@@ -3,6 +3,7 @@ import { Injectable, Logger, UnprocessableEntityException } from '@nestjs/common
 import { uuidv7 } from 'uuidv7';
 import Decimal from 'decimal.js';
 import { DatabaseService } from '@database/database.service';
+import type { TransactionClient } from '@database/database.service';
 import { HashChainService } from './hash-chain.service';
 import { LedgerRepository } from './ledger.repository';
 import { BalanceService } from './balance.service';
@@ -56,6 +57,19 @@ export class LedgerService {
       // Leave empty for funding transactions (deposits, loan disbursements).
       // Provide debit account IDs for spending transactions (withdrawals, payments).
       checkBalanceOn?: string[];
+      // An existing transaction client to post into, instead of opening a new
+      // one. Use this when the caller owns a wider transaction boundary that
+      // must commit/rollback atomically with this journal post (e.g. a
+      // refund's cumulative-limit check + journal post + Reversal row insert
+      // all need to be one atomic unit — see reversals.service.ts).
+      //
+      // CONTRACT: when `tx` is supplied, this method does NOT update balance
+      // snapshots after posting (the post-commit snapshot read goes through
+      // the top-level `this.db` connection, outside the caller's still-open
+      // transaction, and would see stale data). The caller is responsible
+      // for calling `BalanceService.updateSnapshot()` for every affected
+      // account once its own transaction has committed.
+      tx?: TransactionClient;
     },
   ): Promise<PostedJournal> {
     // ── Step 1: Validate balance ─────────────────────────────────────────────
@@ -80,9 +94,14 @@ export class LedgerService {
     // Only lock and check balance on explicitly specified accounts
     const balanceCheckAccountIds = options?.checkBalanceOn ?? [];
 
-    const postedEntries: LedgerEntry[] = [];
+    // NOTE: `entries` is built fresh inside `run` (not accumulated in an
+    // outer-scoped array) so that if withRetryTransaction retries this
+    // callback after a conflict, the rolled-back attempt's entries are
+    // discarded along with it rather than polluting the final result with
+    // phantom rows that were never actually committed.
+    const run = async (tx: TransactionClient): Promise<LedgerEntry[]> => {
+      const entries: LedgerEntry[] = [];
 
-    await this.db.withRetryTransaction(async (tx) => {
       // Acquire advisory locks only on accounts we need to balance-check
       if (balanceCheckAccountIds.length > 0) {
         await this.db.acquireAdvisoryLocks(tx, balanceCheckAccountIds);
@@ -157,16 +176,28 @@ export class LedgerService {
 
         const entry = await this.repo.insertEntry(tx, insertData);
 
-        postedEntries.push(entry);
+        entries.push(entry);
         previousHash = hash;
       }
-    });
 
-    const affectedAccountIds = [...new Set(dto.lines.map((l) => l.accountId))];
-    for (const accountId of affectedAccountIds) {
-      const lastEntry = postedEntries.find((e) => e.accountId === accountId);
-      if (lastEntry) {
-        await this.balance.updateSnapshot(accountId, lastEntry.id);
+      return entries;
+    };
+
+    const postedEntries = options?.tx
+      ? await run(options.tx)
+      : await this.db.withRetryTransaction(run);
+
+    // See the `tx` option's doc comment: when the caller supplied its own
+    // transaction, it hasn't committed yet at this point, so updating
+    // snapshots here (via the top-level `this.db` connection) would read
+    // stale data. The caller updates snapshots itself after its commit.
+    if (!options?.tx) {
+      const affectedAccountIds = [...new Set(dto.lines.map((l) => l.accountId))];
+      for (const accountId of affectedAccountIds) {
+        const lastEntry = postedEntries.find((e) => e.accountId === accountId);
+        if (lastEntry) {
+          await this.balance.updateSnapshot(accountId, lastEntry.id);
+        }
       }
     }
 

@@ -138,6 +138,22 @@ describe('TrialBalanceService (integration)', () => {
     expect(report.discrepancy).toBe('0.0000');
   });
 
+  it('displays a credit-normal account (LIABILITY) netBalance as positive, not raw debit-minus-credit (regression test for the sign bug)', async () => {
+    await postDeposit('10000.0000', '01932a1b-0000-7000-8000-000000000150');
+
+    const report = await trialBalance.generate();
+    expect(report.isBalanced).toBe(true);
+
+    const walletLine = report.lines.find((l) => l.accountCode === '1001');
+    const liabilityLine = report.lines.find((l) => l.accountCode === '2001');
+
+    expect(walletLine?.netBalance).toBe('10000.0000');
+    // Raw debit-minus-credit for the liability leg would be -10000.0000
+    // (it received a CREDIT). Since LIABILITY is credit-normal, the
+    // displayed netBalance must be sign-corrected to +10000.0000.
+    expect(liabilityLine?.netBalance).toBe('10000.0000');
+  });
+
   it('remains balanced after 50 random deposits', async () => {
     const amounts = Array.from({ length: 50 }, (_, i) => ((i + 1) * 1000).toFixed(4));
 

@@ -1,8 +1,9 @@
 // src/reporting/trial-balance.service.ts
 import { Injectable, Logger } from '@nestjs/common';
 import { DatabaseService } from '@database/database.service';
-import { toDecimal } from '@common/types/money.type';
+import { normalBalanceSign, toDecimal } from '@common/types/money.type';
 import Decimal from 'decimal.js';
+import type { AccountType } from '@prisma/client';
 
 export interface TrialBalanceLine {
   accountCode: string;
@@ -51,7 +52,10 @@ export class TrialBalanceService {
    *   SUM(CASE WHEN entry_type = 'DEBIT' THEN amount ELSE -amount END)
    * This is wrong — it gives a raw debit-minus-credit which has different
    * meaning per account type. We keep this raw value for the math check
-   * (debits must equal credits globally) but display it correctly per type.
+   * (debits must equal credits globally), but multiply by normalBalanceSign()
+   * before display so a credit-normal account (LIABILITY/EQUITY/REVENUE)
+   * with a credit balance shows as positive, not negative — matching the
+   * same correction already applied in account-statement.service.ts.
    *
    * The global invariant is:
    *   SUM(all debits) = SUM(all credits)
@@ -102,6 +106,8 @@ export class TrialBalanceService {
       grandTotalDebits = grandTotalDebits.plus(debits);
       grandTotalCredits = grandTotalCredits.plus(credits);
 
+      const sign = normalBalanceSign(row.account_type as AccountType);
+
       return {
         accountCode: row.account_code,
         accountName: row.account_name,
@@ -109,7 +115,7 @@ export class TrialBalanceService {
         currency: row.currency,
         totalDebits: debits.toFixed(4),
         totalCredits: credits.toFixed(4),
-        netBalance: toDecimal(row.net_balance).toFixed(4),
+        netBalance: toDecimal(row.net_balance).times(sign).toFixed(4),
       };
     });
 

@@ -1,5 +1,6 @@
 // src/transactions/handlers/refund-full.handler.ts
 import { Injectable, UnprocessableEntityException } from '@nestjs/common';
+import Decimal from 'decimal.js';
 import { BaseTransactionHandler } from './base-transaction.handler';
 import { computeBalancingLeg } from './balancing-leg.util';
 import type { Account } from '@prisma/client';
@@ -46,8 +47,8 @@ export class RefundFullHandler extends BaseTransactionHandler {
       throw new UnprocessableEntityException('Merchant settlement account is not active');
     }
 
-    const amount = parseFloat(String(payload['amount'] ?? '0'));
-    if (amount <= 0) {
+    const amount = new Decimal(String(payload['amount'] ?? '0'));
+    if (amount.lte(0)) {
       throw new UnprocessableEntityException('Refund amount must be positive');
     }
 
@@ -64,14 +65,14 @@ export class RefundFullHandler extends BaseTransactionHandler {
     const feeRevenue = this.requireAccount(accounts, 'feeRevenue');
     const platformCash = this.requireAccount(accounts, 'platformOperatingCash');
 
-    const amount = String(payload['amount'] ?? '');
-    const fee = String(payload['feeAmount'] ?? '0.0000');
+    const amount = new Decimal(String(payload['amount'] ?? '0'));
+    const fee = new Decimal(String(payload['feeAmount'] ?? '0.0000'));
     const currency = String(payload['currency'] ?? 'INR');
     const effectiveDate = String(payload['effectiveDate'] ?? new Date().toISOString());
     const originalRef = String(payload['originalTransactionId'] ?? '');
     const reason = String(payload['reason'] ?? 'Customer refund');
 
-    const totalRefund = (parseFloat(amount) + parseFloat(fee)).toFixed(4);
+    const totalRefund = amount.plus(fee).toDecimalPlaces(4, Decimal.ROUND_HALF_UP).toFixed(4);
 
     const realLines = [
       {
@@ -84,14 +85,14 @@ export class RefundFullHandler extends BaseTransactionHandler {
       {
         accountId: merchantSettlement.id,
         entryType: 'CREDIT' as const,
-        amount,
+        amount: amount.toFixed(4),
         currency,
         narrative: `Full refund — reversal of ${originalRef}: ${reason}`,
       },
       {
         accountId: feeRevenue.id,
         entryType: 'DEBIT' as const,
-        amount: fee,
+        amount: fee.toFixed(4),
         currency,
         narrative: `Fee reversal on full refund of ${originalRef}`,
       },

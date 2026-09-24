@@ -1,6 +1,11 @@
 import { FxConversionHandler } from '@transactions/handlers/fx-conversion.handler';
 import type { FxRateService } from '@fx/fx-rate.service';
 import type { Account, ExchangeRateSnapshot } from '@prisma/client';
+import {
+  assertJournalBalanced,
+  assertAssetAccountMoves,
+  assertCreditNormalAccountMoves,
+} from './journal-entry-assertions.util';
 
 function makeAccount(overrides: Partial<Account> = {}): Account {
   return {
@@ -25,7 +30,11 @@ describe('FxConversionHandler', () => {
   let fxRateService: jest.Mocked<FxRateService>;
   const accounts = {
     sourceWallet: makeAccount({ id: 'src-id' }),
-    targetWallet: makeAccount({ id: 'tgt-id' }),
+    targetWallet: makeAccount({ id: 'tgt-id', currency: 'INR' }),
+    fxRevenue: makeAccount({ id: 'fx-revenue-id', type: 'REVENUE' }),
+    fxHoldingSource: makeAccount({ id: 'fx-holding-src-id' }),
+    fxHoldingTarget: makeAccount({ id: 'fx-holding-tgt-id' }),
+    platformOperatingCash: makeAccount({ id: 'platform-id' }),
   };
 
   beforeEach(() => {
@@ -92,5 +101,62 @@ describe('FxConversionHandler', () => {
     await expect(
       validate({ sourceAmount: '100.0000', exchangeRate: '83.5' }, accounts),
     ).resolves.not.toThrow();
+  });
+
+  describe('buildJournalEntry', () => {
+    function build(payload: Record<string, unknown>) {
+      return (
+        handler as unknown as {
+          buildJournalEntry: (
+            id: string,
+            p: Record<string, unknown>,
+            a: Record<string, Account>,
+          ) => {
+            lines: Array<{ accountId: string; entryType: 'DEBIT' | 'CREDIT'; amount: string }>;
+          };
+        }
+      ).buildJournalEntry('txn-1', payload, accounts);
+    }
+
+    const payload = {
+      sourceAmount: '100.0000',
+      exchangeRate: '83.5000',
+      sourceCurrency: 'USD',
+      targetCurrency: 'INR',
+    };
+
+    it('produces a fully balanced journal entry', () => {
+      const dto = build(payload);
+      assertJournalBalanced(dto.lines);
+    });
+
+    it('CREDITs fxRevenue (regression test for the fixed polarity bug — revenue must increase, not decrease)', () => {
+      const dto = build(payload);
+      const revenueLine = dto.lines.find((l) => l.accountId === 'fx-revenue-id');
+      expect(revenueLine?.entryType).toBe('CREDIT');
+      assertCreditNormalAccountMoves(dto.lines, 'fx-revenue-id', 'increase');
+    });
+
+    it('DECREASES the source wallet balance', () => {
+      const dto = build(payload);
+      assertAssetAccountMoves(dto.lines, 'src-id', 'decrease');
+    });
+
+    it('INCREASES the target wallet balance by grossTarget minus the markup', () => {
+      const dto = build(payload);
+      assertAssetAccountMoves(dto.lines, 'tgt-id', 'increase');
+      const targetLine = dto.lines.find((l) => l.accountId === 'tgt-id');
+      // grossTarget = 100 * 83.5 = 8350.0000; markup = 0.5% = 41.7500
+      expect(targetLine?.amount).toBe('8308.2500');
+    });
+
+    it('plugs the residual on platformOperatingCash (see ADR-007)', () => {
+      const dto = build(payload);
+      const plugLine = dto.lines.find((l) => l.accountId === 'platform-id');
+      expect(plugLine).toBeDefined();
+      expect(plugLine?.entryType).toBe('DEBIT');
+      // residual = 2 x markup = 2 x 41.7500 = 83.5000
+      expect(plugLine?.amount).toBe('83.5000');
+    });
   });
 });

@@ -1,5 +1,6 @@
 // src/transactions/handlers/p2p-transfer.handler.ts
 import { Injectable, UnprocessableEntityException } from '@nestjs/common';
+import Decimal from 'decimal.js';
 import { BaseTransactionHandler } from './base-transaction.handler';
 import { computeBalancingLeg } from './balancing-leg.util';
 import type { Account } from '@prisma/client';
@@ -52,8 +53,8 @@ export class P2pTransferHandler extends BaseTransactionHandler {
       throw new UnprocessableEntityException('Sender and recipient cannot be the same account');
     }
 
-    const amount = parseFloat(String(payload['amount'] ?? '0'));
-    if (amount > parseFloat(P2pTransferHandler.MAX_TRANSFER)) {
+    const amount = new Decimal(String(payload['amount'] ?? '0'));
+    if (amount.gt(new Decimal(P2pTransferHandler.MAX_TRANSFER))) {
       throw new UnprocessableEntityException(
         `Transfer amount exceeds limit of ${P2pTransferHandler.MAX_TRANSFER}`,
       );
@@ -66,6 +67,25 @@ export class P2pTransferHandler extends BaseTransactionHandler {
     return true;
   }
 
+  // Retrofit example proving TransactionLimitService/getLimitCheckSpecs()
+  // (see base-transaction.handler.ts) is genuinely generic, not an
+  // NGN-only mechanism introduced alongside nip-transfer/ussd-transfer.
+  protected getLimitCheckSpecs(
+    payload: Record<string, unknown>,
+    accounts: Record<string, Account>,
+  ): { accountId: string; amount: string }[] {
+    const senderWallet = accounts['senderWallet'];
+    if (!senderWallet) return [];
+
+    const amount = new Decimal(String(payload['amount'] ?? '0'));
+    const totalDebit = amount
+      .plus(P2pTransferHandler.TRANSFER_FEE)
+      .toDecimalPlaces(4, Decimal.ROUND_HALF_UP)
+      .toFixed(4);
+
+    return [{ accountId: senderWallet.id, amount: totalDebit }];
+  }
+
   protected buildJournalEntry(
     transactionId: string,
     payload: Record<string, unknown>,
@@ -76,13 +96,13 @@ export class P2pTransferHandler extends BaseTransactionHandler {
     const feeRevenue = this.requireAccount(accounts, 'feeRevenue');
     const platformCash = this.requireAccount(accounts, 'platformOperatingCash');
 
-    const amount = String(payload['amount'] ?? '');
+    const amount = new Decimal(String(payload['amount'] ?? '0'));
     const currency = String(payload['currency'] ?? 'INR');
     const effectiveDate = String(payload['effectiveDate'] ?? new Date().toISOString());
-    const fee = P2pTransferHandler.TRANSFER_FEE;
+    const fee = new Decimal(P2pTransferHandler.TRANSFER_FEE);
 
     // Total sender debit (economic, informational) = amount + fee
-    const totalDebit = (parseFloat(amount) + parseFloat(fee)).toFixed(4);
+    const totalDebit = amount.plus(fee).toDecimalPlaces(4, Decimal.ROUND_HALF_UP).toFixed(4);
 
     // "Real" lines — each entryType is correct per Table A1.1 for its own account.
     const realLines = [
@@ -91,19 +111,19 @@ export class P2pTransferHandler extends BaseTransactionHandler {
         entryType: 'CREDIT' as const,
         amount: totalDebit,
         currency,
-        narrative: `P2P transfer sent — amount ${amount} + fee ${fee}`,
+        narrative: `P2P transfer sent — amount ${amount.toFixed(4)} + fee ${fee.toFixed(4)}`,
       },
       {
         accountId: recipientWallet.id,
         entryType: 'DEBIT' as const,
-        amount,
+        amount: amount.toFixed(4),
         currency,
         narrative: `P2P transfer received from ${senderWallet.id}`,
       },
       {
         accountId: feeRevenue.id,
         entryType: 'CREDIT' as const,
-        amount: fee,
+        amount: fee.toFixed(4),
         currency,
         narrative: `P2P transfer fee`,
       },

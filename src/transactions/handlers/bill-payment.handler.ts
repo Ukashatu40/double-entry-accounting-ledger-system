@@ -1,5 +1,6 @@
 // src/transactions/handlers/bill-payment.handler.ts
 import { Injectable, UnprocessableEntityException } from '@nestjs/common';
+import Decimal from 'decimal.js';
 import { BaseTransactionHandler } from './base-transaction.handler';
 import { computeBalancingLeg } from './balancing-leg.util';
 import type { Account } from '@prisma/client';
@@ -45,12 +46,12 @@ export class BillPaymentHandler extends BaseTransactionHandler {
       throw new UnprocessableEntityException(`Biller settlement account is not active`);
     }
 
-    const amount = parseFloat(String(payload['amount'] ?? '0'));
-    if (amount <= 0) {
+    const amount = new Decimal(String(payload['amount'] ?? '0'));
+    if (amount.lte(0)) {
       throw new UnprocessableEntityException('Bill amount must be positive');
     }
 
-    if (amount > parseFloat(BillPaymentHandler.MAX_AMOUNT)) {
+    if (amount.gt(new Decimal(BillPaymentHandler.MAX_AMOUNT))) {
       throw new UnprocessableEntityException(
         `Bill amount exceeds limit of ${BillPaymentHandler.MAX_AMOUNT}`,
       );
@@ -73,13 +74,13 @@ export class BillPaymentHandler extends BaseTransactionHandler {
     const feeRevenue = this.requireAccount(accounts, 'feeRevenue');
     const platformCash = this.requireAccount(accounts, 'platformOperatingCash');
 
-    const amount = parseFloat(String(payload['amount'] ?? '0'));
+    const amount = new Decimal(String(payload['amount'] ?? '0'));
     const currency = String(payload['currency'] ?? 'INR');
     const effectiveDate = String(payload['effectiveDate'] ?? new Date().toISOString());
     const billerName = String(payload['billerName'] ?? 'Utility Biller');
     const billRef = String(payload['billReference'] ?? '');
-    const fee = BillPaymentHandler.CONVENIENCE_FEE;
-    const totalDebit = (amount + parseFloat(fee)).toFixed(4);
+    const fee = new Decimal(BillPaymentHandler.CONVENIENCE_FEE);
+    const totalDebit = amount.plus(fee).toDecimalPlaces(4, Decimal.ROUND_HALF_UP).toFixed(4);
     const amountStr = amount.toFixed(4);
 
     const realLines = [
@@ -100,7 +101,7 @@ export class BillPaymentHandler extends BaseTransactionHandler {
       {
         accountId: feeRevenue.id,
         entryType: 'CREDIT' as const,
-        amount: fee,
+        amount: fee.toFixed(4),
         currency,
         narrative: `Bill payment convenience fee`,
       },

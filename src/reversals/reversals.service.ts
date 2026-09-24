@@ -9,7 +9,9 @@ import {
 import { uuidv7 } from 'uuidv7';
 import Decimal from 'decimal.js';
 import { DatabaseService } from '@database/database.service';
+import type { TransactionClient } from '@database/database.service';
 import { LedgerService } from '@ledger/ledger.service';
+import { BalanceService } from '@ledger/balance.service';
 import type { LedgerEntry, Reversal } from '@prisma/client';
 import type { FullReversalDto, PartialRefundDto } from './dto/reversal.dto';
 
@@ -31,6 +33,7 @@ export class ReversalsService {
   constructor(
     private readonly db: DatabaseService,
     private readonly ledger: LedgerService,
+    private readonly balance: BalanceService,
   ) {}
 
   /**
@@ -122,9 +125,6 @@ export class ReversalsService {
       );
     }
 
-    // Verify not already reversed
-    await this.assertNotAlreadyReversed(dto.originalTransactionId);
-
     // Compute total reversed amount for the reversal record — see
     // deriveOriginalAmount() for why this is NOT a naive sum of DEBIT lines.
     const totalAmount = await this.deriveOriginalAmount(originalEntries);
@@ -140,49 +140,74 @@ export class ReversalsService {
       narrative: `Reversal of entry ${e.id}: ${dto.reason}`,
     }));
 
-    const journal = await this.ledger.postJournalEntry(
-      {
-        referenceType: 'REFUND_FULL',
-        referenceId: reversalTransactionId,
-        effectiveDate: new Date().toISOString(),
-        lines: mirrorLines,
-        metadata: {
-          originalTransactionId: dto.originalTransactionId,
-          reason: dto.reason,
-          reversedBy: actor,
-        },
-      },
-      actor,
-      idempotencyKey,
-      { checkBalanceOn: [] },
-    );
+    // The "verify not already reversed" check and the "record the
+    // reversal" insert must be one atomic, serialized unit — otherwise two
+    // concurrent full-reversal requests for the same original transaction
+    // can both pass the check before either commits (TOCTOU), producing two
+    // mirror journals for one transaction. The advisory lock on
+    // originalTransactionId serializes every reversal/refund attempt
+    // against that transaction from the start; see ledger.service.ts's own
+    // use of acquireAdvisoryLocks + withRetryTransaction for the precedent.
+    const { journal, reversalRecord } = await this.db.withRetryTransaction(async (tx) => {
+      await this.db.acquireAdvisoryLocks(tx, [dto.originalTransactionId]);
 
-    // Record the reversal in the reversals table
-    const reversalRecord = await this.db.reversal.create({
-      data: {
-        id: uuidv7(),
-        originalTransactionId: dto.originalTransactionId,
-        reversalTransactionId,
-        amount: totalAmount.toFixed(4),
-        currency: originalEntries[0]?.currency ?? 'INR',
-        feePolicy: 'FULL',
-        feeAmountReversed: '0.0000',
-        reason: dto.reason,
-        initiatedBy: actor,
+      await this.assertNotAlreadyReversed(dto.originalTransactionId, tx);
+
+      const postedJournal = await this.ledger.postJournalEntry(
+        {
+          referenceType: 'REFUND_FULL',
+          referenceId: reversalTransactionId,
+          effectiveDate: new Date().toISOString(),
+          lines: mirrorLines,
+          metadata: {
+            originalTransactionId: dto.originalTransactionId,
+            reason: dto.reason,
+            reversedBy: actor,
+          },
+        },
+        actor,
         idempotencyKey,
-      },
+        { checkBalanceOn: [], tx },
+      );
+
+      const createdReversal = await (tx as DatabaseService).reversal.create({
+        data: {
+          id: uuidv7(),
+          originalTransactionId: dto.originalTransactionId,
+          reversalTransactionId,
+          amount: totalAmount.toFixed(4),
+          currency: originalEntries[0]?.currency ?? 'INR',
+          feePolicy: 'FULL',
+          feeAmountReversed: '0.0000',
+          reason: dto.reason,
+          initiatedBy: actor,
+          idempotencyKey,
+        },
+      });
+
+      // Mark original transaction as REVERSED — folded into the same
+      // transaction so it's atomic with the journal post + reversal insert.
+      await (tx as DatabaseService).transaction.updateMany({
+        where: { id: dto.originalTransactionId },
+        data: { status: 'REVERSED' },
+      });
+
+      return { journal: postedJournal, reversalRecord: createdReversal };
     });
+
+    // Transaction has committed — safe to update balance snapshots now
+    // (see the `tx` option's contract on LedgerService.postJournalEntry).
+    for (const accountId of new Set(journal.entries.map((e) => e.accountId))) {
+      const lastEntry = journal.entries.find((e) => e.accountId === accountId);
+      if (lastEntry) {
+        await this.balance.updateSnapshot(accountId, lastEntry.id);
+      }
+    }
 
     this.logger.log(
       `Full reversal posted: original=${dto.originalTransactionId} ` +
         `reversal=${reversalTransactionId} amount=${totalAmount.toFixed(4)} by=${actor}`,
     );
-
-    // Mark original transaction as REVERSED
-    await this.db.transaction.updateMany({
-      where: { id: dto.originalTransactionId },
-      data: { status: 'REVERSED' },
-    });
 
     return {
       reversalId: reversalRecord.id,
@@ -232,8 +257,6 @@ export class ReversalsService {
       );
     }
 
-    await this.assertNotFullyReversed(dto.originalTransactionId);
-
     // Total original amount — see deriveOriginalAmount() for why this is
     // NOT a naive sum of DEBIT lines.
     const originalAmount = await this.deriveOriginalAmount(originalEntries);
@@ -248,19 +271,15 @@ export class ReversalsService {
       );
     }
 
-    // Also check cumulative refunds don't exceed original
-    await this.assertCumulativeRefundLimit(dto.originalTransactionId, refundAmount, originalAmount);
-
     // Fee computation based on policy
     const originalFee = new Decimal(dto.originalFeeAmount ?? '0');
     let feeRefund = new Decimal(0);
 
     switch (dto.feePolicy) {
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-enum-comparison
       case 'FULL':
         feeRefund = originalFee;
         break;
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-enum-comparison
+
       case 'PROPORTIONAL':
         feeRefund = originalAmount.gt(0)
           ? refundAmount
@@ -269,7 +288,7 @@ export class ReversalsService {
               .toDecimalPlaces(4, Decimal.ROUND_HALF_UP)
           : new Decimal(0);
         break;
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-enum-comparison
+
       case 'NONE':
         feeRefund = new Decimal(0);
         break;
@@ -332,38 +351,71 @@ export class ReversalsService {
       }
     }
 
-    const journal = await this.ledger.postJournalEntry(
-      {
-        referenceType: 'REFUND_PARTIAL',
-        referenceId: reversalTransactionId,
-        effectiveDate: new Date().toISOString(),
-        lines,
-        metadata: {
-          originalTransactionId: dto.originalTransactionId,
-          feePolicy: dto.feePolicy,
-          reason: dto.reason,
-          reversedBy: actor,
-        },
-      },
-      actor,
-      idempotencyKey,
-      { checkBalanceOn: [] },
-    );
+    // The "not fully reversed" + "cumulative refund limit" checks and the
+    // "record the reversal" insert must be one atomic, serialized unit —
+    // otherwise two concurrent partial refunds against the same original
+    // transaction can both pass the checks before either commits (TOCTOU),
+    // jointly over-refunding beyond the original amount. The advisory lock
+    // on originalTransactionId serializes every reversal/refund attempt
+    // against that transaction from the start — see reverseTransaction()'s
+    // identical pattern and ledger.service.ts's own precedent.
+    const { journal, reversalRecord } = await this.db.withRetryTransaction(async (tx) => {
+      await this.db.acquireAdvisoryLocks(tx, [dto.originalTransactionId]);
 
-    const reversalRecord = await this.db.reversal.create({
-      data: {
-        id: uuidv7(),
-        originalTransactionId: dto.originalTransactionId,
-        reversalTransactionId,
-        amount: refundAmount.toFixed(4),
-        currency,
-        feePolicy: dto.feePolicy,
-        feeAmountReversed: feeRefund.toFixed(4),
-        reason: dto.reason,
-        initiatedBy: actor,
+      await this.assertNotFullyReversed(dto.originalTransactionId, tx);
+
+      // Also check cumulative refunds don't exceed original
+      await this.assertCumulativeRefundLimit(
+        dto.originalTransactionId,
+        refundAmount,
+        originalAmount,
+        tx,
+      );
+
+      const postedJournal = await this.ledger.postJournalEntry(
+        {
+          referenceType: 'REFUND_PARTIAL',
+          referenceId: reversalTransactionId,
+          effectiveDate: new Date().toISOString(),
+          lines,
+          metadata: {
+            originalTransactionId: dto.originalTransactionId,
+            feePolicy: dto.feePolicy,
+            reason: dto.reason,
+            reversedBy: actor,
+          },
+        },
+        actor,
         idempotencyKey,
-      },
+        { checkBalanceOn: [], tx },
+      );
+
+      const createdReversal = await (tx as DatabaseService).reversal.create({
+        data: {
+          id: uuidv7(),
+          originalTransactionId: dto.originalTransactionId,
+          reversalTransactionId,
+          amount: refundAmount.toFixed(4),
+          currency,
+          feePolicy: dto.feePolicy,
+          feeAmountReversed: feeRefund.toFixed(4),
+          reason: dto.reason,
+          initiatedBy: actor,
+          idempotencyKey,
+        },
+      });
+
+      return { journal: postedJournal, reversalRecord: createdReversal };
     });
+
+    // Transaction has committed — safe to update balance snapshots now
+    // (see the `tx` option's contract on LedgerService.postJournalEntry).
+    for (const accountId of new Set(journal.entries.map((e) => e.accountId))) {
+      const lastEntry = journal.entries.find((e) => e.accountId === accountId);
+      if (lastEntry) {
+        await this.balance.updateSnapshot(accountId, lastEntry.id);
+      }
+    }
 
     this.logger.log(
       `Partial refund posted: original=${dto.originalTransactionId} ` +
@@ -393,8 +445,10 @@ export class ReversalsService {
     originalTransactionId: string,
     newRefundAmount: Decimal,
     originalAmount: Decimal,
+    tx?: TransactionClient,
   ): Promise<void> {
-    const previousRefunds = await this.db.reversal.findMany({
+    const client = (tx ?? this.db) as DatabaseService;
+    const previousRefunds = await client.reversal.findMany({
       where: { originalTransactionId },
       select: { amount: true },
     });
@@ -436,14 +490,18 @@ export class ReversalsService {
    * blocks further partial refunds, since a full reversal means the
    * transaction's economic effect has already been completely undone.
    */
-  private async assertNotFullyReversed(transactionId: string): Promise<void> {
-    const originalEntries = await this.db.ledgerEntry.findMany({
+  private async assertNotFullyReversed(
+    transactionId: string,
+    tx?: TransactionClient,
+  ): Promise<void> {
+    const client = (tx ?? this.db) as DatabaseService;
+    const originalEntries = await client.ledgerEntry.findMany({
       where: { referenceId: transactionId, status: 'POSTED' },
     });
 
     const originalAmount = await this.deriveOriginalAmount(originalEntries);
 
-    const priorFullReversal = await this.db.reversal.findFirst({
+    const priorFullReversal = await client.reversal.findFirst({
       where: {
         originalTransactionId: transactionId,
         feePolicy: 'FULL',
@@ -460,8 +518,12 @@ export class ReversalsService {
     }
   }
 
-  private async assertNotAlreadyReversed(transactionId: string): Promise<void> {
-    const existing = await this.db.reversal.findFirst({
+  private async assertNotAlreadyReversed(
+    transactionId: string,
+    tx?: TransactionClient,
+  ): Promise<void> {
+    const client = (tx ?? this.db) as DatabaseService;
+    const existing = await client.reversal.findFirst({
       where: { originalTransactionId: transactionId },
       orderBy: { createdAt: 'asc' },
     });

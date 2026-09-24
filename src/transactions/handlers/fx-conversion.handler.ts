@@ -1,13 +1,23 @@
 // src/transactions/handlers/fx-conversion.handler.ts
-// Add constructor injection:
-
 import { Injectable, UnprocessableEntityException } from '@nestjs/common';
 import Decimal from 'decimal.js';
 import { BaseTransactionHandler } from './base-transaction.handler';
+import { computeBalancingLeg } from './balancing-leg.util';
 import { FxRateService } from '@fx/fx-rate.service';
 import type { Account } from '@prisma/client';
 import type { CreateJournalEntryDto } from '@ledger/dto/create-journal-entry.dto';
 
+/**
+ * Transaction Type #15 — FX Conversion
+ *
+ * NOTE on prior bug: fxRevenue was previously posted as DEBIT, which
+ * *decreases* a credit-normal Revenue account instead of recognizing the
+ * markup as revenue — a silent polarity bug (the entry still balanced
+ * numerically). This handler was not among the 13 handlers fixed under
+ * ADR-007; it is now a 14th consumer of that same Platform Operating Cash
+ * balancing-leg pattern (see balancing-leg.util.ts) since pairing a wallet
+ * movement with a revenue-recognition leg can never balance on its own.
+ */
 @Injectable()
 export class FxConversionHandler extends BaseTransactionHandler {
   private static readonly MARKUP_RATE = new Decimal('0.005');
@@ -47,17 +57,21 @@ export class FxConversionHandler extends BaseTransactionHandler {
     await this.fxRateService.getCurrentRate(sourceCurrency, targetCurrency);
   }
 
+  protected requiresPlatformOperatingCash(): boolean {
+    return true;
+  }
+
   protected buildJournalEntry(
     transactionId: string,
     payload: Record<string, unknown>,
     accounts: Record<string, Account>,
   ): CreateJournalEntryDto {
-    // ... unchanged from before ...
     const sourceWallet = this.requireAccount(accounts, 'sourceWallet');
     const targetWallet = this.requireAccount(accounts, 'targetWallet');
     const fxRevenue = this.requireAccount(accounts, 'fxRevenue');
     const fxHoldingSrc = this.requireAccount(accounts, 'fxHoldingSource');
     const fxHoldingTgt = this.requireAccount(accounts, 'fxHoldingTarget');
+    const platformCash = this.requireAccount(accounts, 'platformOperatingCash');
 
     const sourceAmount = new Decimal(String(payload['sourceAmount'] ?? '0'));
     const exchangeRate = new Decimal(String(payload['exchangeRate'] ?? '0'));
@@ -71,6 +85,63 @@ export class FxConversionHandler extends BaseTransactionHandler {
       .times(FxConversionHandler.MARKUP_RATE)
       .toDecimalPlaces(4, Decimal.ROUND_HALF_UP);
 
+    // "Real" lines — each entryType is correct per Table A1.1 for its own
+    // account. fxRevenue is CREDIT because this transaction originates new
+    // revenue (the FX spread markup) — see ADR-007 for why a wallet-decrease
+    // + revenue-increase pairing alone cannot balance, and why the residual
+    // must be plugged via Platform Operating Cash rather than hand-derived.
+    const realLines = [
+      {
+        accountId: sourceWallet.id,
+        entryType: 'CREDIT' as const,
+        amount: sourceAmount.toFixed(4),
+        currency: sourceCurrency,
+        narrative: `FX conversion — sold ${sourceAmount.toFixed(4)} ${sourceCurrency}`,
+      },
+      {
+        accountId: fxHoldingSrc.id,
+        entryType: 'DEBIT' as const,
+        amount: sourceAmount.toFixed(4),
+        currency: sourceCurrency,
+        narrative: `FX holding — received ${sourceCurrency}`,
+      },
+      {
+        accountId: fxHoldingTgt.id,
+        entryType: 'CREDIT' as const,
+        amount: grossTarget.toFixed(4),
+        currency: targetCurrency,
+        narrative: `FX holding — released ${targetCurrency} at rate ${exchangeRate.toFixed(8)}`,
+      },
+      {
+        accountId: targetWallet.id,
+        entryType: 'DEBIT' as const,
+        amount: grossTarget.minus(markup).toFixed(4),
+        currency: targetCurrency,
+        narrative: `FX conversion — received ${grossTarget.minus(markup).toFixed(4)} ${targetCurrency}`,
+      },
+      {
+        accountId: fxRevenue.id,
+        entryType: 'CREDIT' as const,
+        amount: markup.toFixed(4),
+        currency: targetCurrency,
+        narrative: `FX spread revenue — 0.5% markup`,
+      },
+    ];
+
+    const plug = computeBalancingLeg(realLines);
+    const lines = plug
+      ? [
+          ...realLines,
+          {
+            accountId: platformCash.id,
+            entryType: plug.entryType,
+            amount: plug.amount,
+            currency: targetCurrency,
+            narrative: `FX conversion — balancing leg (see ADR-007)`,
+          },
+        ]
+      : realLines;
+
     return {
       referenceType: 'FX_CONVERSION',
       referenceId: transactionId,
@@ -83,43 +154,7 @@ export class FxConversionHandler extends BaseTransactionHandler {
         markup: markup.toFixed(4),
         rateSnapshotId,
       },
-      lines: [
-        {
-          accountId: sourceWallet.id,
-          entryType: 'CREDIT',
-          amount: sourceAmount.toFixed(4),
-          currency: sourceCurrency,
-          narrative: `FX conversion — sold ${sourceAmount.toFixed(4)} ${sourceCurrency}`,
-        },
-        {
-          accountId: fxHoldingSrc.id,
-          entryType: 'DEBIT',
-          amount: sourceAmount.toFixed(4),
-          currency: sourceCurrency,
-          narrative: `FX holding — received ${sourceCurrency}`,
-        },
-        {
-          accountId: fxHoldingTgt.id,
-          entryType: 'CREDIT',
-          amount: grossTarget.toFixed(4),
-          currency: targetCurrency,
-          narrative: `FX holding — released ${targetCurrency} at rate ${exchangeRate.toFixed(8)}`,
-        },
-        {
-          accountId: targetWallet.id,
-          entryType: 'DEBIT',
-          amount: grossTarget.minus(markup).toFixed(4),
-          currency: targetCurrency,
-          narrative: `FX conversion — received ${grossTarget.minus(markup).toFixed(4)} ${targetCurrency}`,
-        },
-        {
-          accountId: fxRevenue.id,
-          entryType: 'DEBIT',
-          amount: markup.toFixed(4),
-          currency: targetCurrency,
-          narrative: `FX spread revenue — 0.5% markup`,
-        },
-      ],
+      lines,
     };
   }
 
