@@ -1,8 +1,17 @@
 // src/accounts/dto/create-account.dto.ts
-import { IsString, IsEnum, IsOptional, IsUUID, Length, Matches, MaxLength } from 'class-validator';
+import {
+  IsString,
+  IsEnum,
+  IsIn,
+  IsOptional,
+  IsUUID,
+  Length,
+  Matches,
+  MaxLength,
+} from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { AccountType, AccountSubType } from '@prisma/client';
-// import { SUPPORTED_CURRENCIES } from '@common/types/currency.type';
+import { SUPPORTED_CURRENCIES } from '@common/types/currency.type';
 
 export class CreateAccountDto {
   @ApiProperty({
@@ -28,10 +37,15 @@ export class CreateAccountDto {
   @IsEnum(AccountSubType)
   subType!: AccountSubType;
 
-  @ApiProperty({ example: 'INR', description: 'ISO 4217 currency code' })
+  @ApiProperty({
+    example: 'INR',
+    description: 'ISO 4217 currency code',
+    enum: SUPPORTED_CURRENCIES,
+  })
   @IsString()
-  @Length(3, 3)
-  @Matches(/^[A-Z]{3}$/, { message: 'currency must be a 3-letter ISO 4217 code' })
+  @IsIn(SUPPORTED_CURRENCIES, {
+    message: `currency must be one of: ${SUPPORTED_CURRENCIES.join(', ')}`,
+  })
   currency!: string;
 
   @ApiPropertyOptional({ example: 'GBP wallet for UK customers' })

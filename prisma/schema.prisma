@@ -103,6 +103,10 @@ enum TransactionType {
   CHARGEBACK
   REWARD_REDEMPTION
   ACCOUNT_CLOSURE_SWEEP
+  /// NIBSS Instant Payment — Nigeria's real-time interbank transfer rail (NGN only)
+  NIP_TRANSFER
+  /// Nigeria's USSD banking channel (e.g. *737#-style), a lower-cap NGN transfer
+  USSD_TRANSFER
 }
 
 /// Lifecycle state of a transaction.

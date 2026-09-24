@@ -5,6 +5,7 @@ import { Pool } from 'pg';
 import * as dotenv from 'dotenv'; // 1. Import dotenv
 import { seedChartOfAccounts } from './chart-of-accounts.seed';
 import { seedExchangeRates } from './exchange-rates.seed';
+import { seedTransactionLimits } from './transaction-limits.seed';
 
 dotenv.config();
 
@@ -25,6 +26,8 @@ async function main(): Promise<void> {
   await seedChartOfAccounts(prisma);
 
   await seedExchangeRates(prisma);
+
+  await seedTransactionLimits(prisma);
 
   console.log('\n✅ Seed complete.\n');
 }

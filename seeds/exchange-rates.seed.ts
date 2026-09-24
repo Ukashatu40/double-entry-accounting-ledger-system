@@ -10,6 +10,15 @@ const RATES = [
   { base: 'JPY', quote: 'INR', rate: '0.54320000' },
   { base: 'AED', quote: 'INR', rate: '22.71000000' },
   { base: 'SGD', quote: 'INR', rate: '61.88000000' },
+  // ── NGN pairs — ILLUSTRATIVE SEED DATA, not live market rates ────────────
+  // NGN/INR is seeded directly (not just NGN vs USD/EUR/GBP) because FX rate
+  // lookup is an exact {base, quote} match with no cross-rate computation,
+  // and this system's home/reporting currency is INR — an NGN-wallet
+  // customer converting directly to/from INR needs that pair to exist.
+  { base: 'USD', quote: 'NGN', rate: '1550.00000000' },
+  { base: 'EUR', quote: 'NGN', rate: '1680.00000000' },
+  { base: 'GBP', quote: 'NGN', rate: '1970.00000000' },
+  { base: 'NGN', quote: 'INR', rate: '0.05400000' },
 ];
 
 export async function seedExchangeRates(prisma: PrismaClient): Promise<void> {

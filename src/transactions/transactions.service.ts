@@ -8,6 +8,7 @@ import {
 import { LedgerService } from '@ledger/ledger.service';
 import { AccountsRepository } from '@accounts/accounts.repository';
 import { IdempotencyService } from './idempotency.service';
+import { TransactionLimitService } from './transaction-limit.service';
 import { DepositBankHandler } from './handlers/deposit-bank.handler';
 import { WithdrawalHandler } from './handlers/withdrawal.handler';
 import { P2pTransferHandler } from './handlers/p2p-transfer.handler';
@@ -28,6 +29,8 @@ import { RefundPartialHandler } from './handlers/refund-partial.handler';
 import { ChargebackHandler } from './handlers/chargeback.handler';
 import { RewardRedemptionHandler } from './handlers/reward-redemption.handler';
 import { AccountClosureHandler } from './handlers/account-closure.handler';
+import { NipTransferHandler } from './handlers/nip-transfer.handler';
+import { UssdTransferHandler } from './handlers/ussd-transfer.handler';
 
 import type {
   BaseTransactionHandler,
@@ -49,6 +52,7 @@ export class TransactionsService {
     private readonly ledger: LedgerService,
     private readonly accounts: AccountsRepository,
     private readonly idempotency: IdempotencyService,
+    private readonly limits: TransactionLimitService,
     private readonly fxConversionHandler: FxConversionHandler, // ← DI-injected
   ) {
     this.handlers = {
@@ -72,6 +76,8 @@ export class TransactionsService {
       CHARGEBACK: new ChargebackHandler(),
       REWARD_REDEMPTION: new RewardRedemptionHandler(),
       ACCOUNT_CLOSURE_SWEEP: new AccountClosureHandler(),
+      NIP_TRANSFER: new NipTransferHandler(),
+      USSD_TRANSFER: new UssdTransferHandler(),
     };
   }
 
@@ -88,8 +94,7 @@ export class TransactionsService {
 
     // ── Idempotency check ────────────────────────────────────────────────────
     let idempotencyKeyRecord:
-      | Awaited<ReturnType<IdempotencyService['checkAndReserve']>>['keyRecord']
-      | undefined;
+      Awaited<ReturnType<IdempotencyService['checkAndReserve']>>['keyRecord'] | undefined;
 
     if (idempotencyKey !== undefined) {
       const effectiveUserId = userId ?? actor;
@@ -121,6 +126,7 @@ export class TransactionsService {
       const ctx: TransactionContext = {
         ledger: this.ledger,
         accounts: this.accounts,
+        limits: this.limits,
         actor,
       };
       if (idempotencyKey !== undefined) ctx.idempotencyKey = idempotencyKey;

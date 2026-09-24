@@ -96,6 +96,22 @@ export const CHART_OF_ACCOUNTS: AccountSeed[] = [
       'Intermediate holding account used during FX conversion entries (target currency leg)',
   },
   {
+    code: '1004',
+    name: 'Customer Wallet – NGN Holdings',
+    type: 'ASSET',
+    subType: 'CURRENT_ASSET',
+    currency: 'NGN',
+    description: 'NGN (Nigerian Naira) foreign currency wallet balance for customer accounts',
+  },
+  {
+    code: '1044',
+    name: 'FX Conversion Holding – NGN',
+    type: 'ASSET',
+    subType: 'FX_HOLDING',
+    currency: 'NGN',
+    description: 'Intermediate holding account used during NGN FX conversion entries',
+  },
+  {
     code: '1050',
     name: 'Platform Operating Cash',
     type: 'ASSET',
@@ -149,6 +165,38 @@ export const CHART_OF_ACCOUNTS: AccountSeed[] = [
     subType: 'CURRENT_LIABILITY',
     currency: 'INR',
     description: 'Liability for unredeemed customer reward points (1 point = INR 0.25)',
+  },
+
+  {
+    code: '2040',
+    name: 'VAT Payable (NGN)',
+    type: 'LIABILITY',
+    subType: 'CURRENT_LIABILITY',
+    currency: 'NGN',
+    description:
+      "VAT collected at Nigeria's standard 7.5% rate on transaction fees for NGN-denominated " +
+      'transactions, per the Finance Act — illustrative modeling, not a compliance-certified rate feed.',
+  },
+  {
+    code: '2041',
+    name: 'Stamp Duty Payable (NGN)',
+    type: 'LIABILITY',
+    subType: 'CURRENT_LIABILITY',
+    currency: 'NGN',
+    description:
+      'Flat ₦50 stamp duty on qualifying electronic transfers of ₦10,000 or more, per the ' +
+      "Finance Act's stamp duty provisions. See stamp-duty.util.ts.",
+  },
+  {
+    code: '2042',
+    name: 'CBN Cybersecurity Levy Payable (NGN)',
+    type: 'LIABILITY',
+    subType: 'CURRENT_LIABILITY',
+    currency: 'NGN',
+    description:
+      '0.005% levy on electronic transfers per the Cybercrime (Prohibition, Prevention, etc.) ' +
+      'Act as amended, remitted to the National Cybersecurity Fund via CBN. Seeded as a CoA ' +
+      'entry only in this change — not yet wired into a transaction handler (see ADR-008).',
   },
 
   // ── EQUITY ────────────────────────────────────────────────────────────────

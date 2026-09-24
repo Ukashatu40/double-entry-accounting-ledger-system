@@ -1,8 +1,10 @@
 // src/transactions/handlers/base-transaction.handler.ts
 import { UnprocessableEntityException } from '@nestjs/common';
 import { uuidv7 } from 'uuidv7';
+import { toDecimal } from '@common/types/money.type';
 import type { LedgerService, PostedJournal } from '@ledger/ledger.service';
 import type { AccountsRepository } from '@accounts/accounts.repository';
+import type { TransactionLimitService } from '../transaction-limit.service';
 import type { TransactionType, Account } from '@prisma/client';
 import type { CreateJournalEntryDto } from '@ledger/dto/create-journal-entry.dto';
 
@@ -13,6 +15,7 @@ import type { CreateJournalEntryDto } from '@ledger/dto/create-journal-entry.dto
 export interface TransactionContext {
   ledger: LedgerService;
   accounts: AccountsRepository;
+  limits: TransactionLimitService;
   actor: string;
   idempotencyKey?: string; // was: idempotencyKey: string — must be optional
 }
@@ -94,6 +97,39 @@ export abstract class BaseTransactionHandler {
   }
 
   /**
+   * Override to declare additional FIXED system accounts (by CoA code) that
+   * this handler's buildJournalEntry() needs, resolved automatically by
+   * execute() — e.g. { stampDutyPayable: '2041' }. Same rationale as
+   * requiresPlatformOperatingCash(): these are system accounts, never
+   * caller-selectable, so they must not go through
+   * TransactionsService.resolveAccounts() — which resolves an entire
+   * payload as EITHER all-UUID-keyed OR all-code-keyed, never a mix, so a
+   * per-payload "AccountCode" key would be silently dropped whenever the
+   * same payload also carries dynamic UUID-keyed accounts (e.g. a sender/
+   * recipient wallet), which is the normal case for any handler using this
+   * hook. Returns {} (nothing extra) by default.
+   */
+  protected additionalSystemAccounts(): Record<string, string> {
+    return {};
+  }
+
+  /**
+   * Override to declare which accounts need a TransactionLimit check before
+   * this transaction posts, and the amount to check against for each (e.g.
+   * [{ accountId: senderWallet.id, amount: totalDebit }]). Opt-in and empty
+   * by default — non-breaking for every handler that doesn't override it.
+   * Checked via TransactionLimitService.assertWithinLimits(), which is a
+   * no-op when no TransactionLimit row exists for that account+type, so
+   * overriding this is safe even for accounts with no configured limit.
+   */
+  protected getLimitCheckSpecs(
+    _payload: Record<string, unknown>,
+    _accounts: Record<string, Account>,
+  ): { accountId: string; amount: string }[] {
+    return [];
+  }
+
+  /**
    * Execute the transaction.
    * Called by TransactionsService after idempotency is checked.
    */
@@ -111,10 +147,24 @@ export abstract class BaseTransactionHandler {
       };
     }
 
+    for (const [key, code] of Object.entries(this.additionalSystemAccounts())) {
+      if (!accountMap[key]) {
+        accountMap = { ...accountMap, [key]: await ctx.accounts.findByCode(code) };
+      }
+    }
+
     await this.validateBusinessRules(payload, accountMap);
 
     const dto = this.buildJournalEntry(transactionId, payload, accountMap);
     const balanceCheckAccounts = this.getBalanceCheckAccounts(payload, accountMap);
+
+    for (const spec of this.getLimitCheckSpecs(payload, accountMap)) {
+      await ctx.limits.assertWithinLimits(
+        spec.accountId,
+        dto.referenceType,
+        toDecimal(spec.amount),
+      );
+    }
 
     const journal = await ctx.ledger.postJournalEntry(dto, ctx.actor, ctx.idempotencyKey, {
       checkBalanceOn: balanceCheckAccounts,

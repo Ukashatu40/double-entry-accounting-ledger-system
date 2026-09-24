@@ -1,26 +1,30 @@
 // src/fx/dto/exchange-rate.dto.ts
-import {
-  IsString,
-  IsDateString,
-  IsOptional,
-  Length,
-  Matches,
-  IsNumberString,
-} from 'class-validator';
+import { IsString, IsDateString, IsOptional, IsIn, IsNumberString } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { ExchangeRateSnapshot } from '@prisma/client';
+import { SUPPORTED_CURRENCIES } from '@common/types/currency.type';
 
 export class CreateExchangeRateDto {
-  @ApiProperty({ example: 'USD', description: 'ISO 4217 base currency' })
+  @ApiProperty({
+    example: 'USD',
+    description: 'ISO 4217 base currency',
+    enum: SUPPORTED_CURRENCIES,
+  })
   @IsString()
-  @Length(3, 3)
-  @Matches(/^[A-Z]{3}$/)
+  @IsIn(SUPPORTED_CURRENCIES, {
+    message: `baseCurrency must be one of: ${SUPPORTED_CURRENCIES.join(', ')}`,
+  })
   baseCurrency!: string;
 
-  @ApiProperty({ example: 'INR', description: 'ISO 4217 quote currency' })
+  @ApiProperty({
+    example: 'INR',
+    description: 'ISO 4217 quote currency',
+    enum: SUPPORTED_CURRENCIES,
+  })
   @IsString()
-  @Length(3, 3)
-  @Matches(/^[A-Z]{3}$/)
+  @IsIn(SUPPORTED_CURRENCIES, {
+    message: `quoteCurrency must be one of: ${SUPPORTED_CURRENCIES.join(', ')}`,
+  })
   quoteCurrency!: string;
 
   @ApiProperty({

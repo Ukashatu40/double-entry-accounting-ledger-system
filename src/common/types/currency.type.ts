@@ -12,6 +12,7 @@ export enum Currency {
   JPY = 'JPY',
   AED = 'AED',
   SGD = 'SGD',
+  NGN = 'NGN',
 }
 
 /** All supported currency codes as a tuple — used for class-validator @IsIn() */
@@ -38,4 +39,5 @@ export const CURRENCY_DECIMALS: Record<Currency, number> = {
   [Currency.JPY]: 0,
   [Currency.AED]: 2,
   [Currency.SGD]: 2,
+  [Currency.NGN]: 2,
 };
