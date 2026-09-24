@@ -34,11 +34,23 @@ describe('Global rate limiting (integration)', () => {
     let sawTooManyRequests = false;
     let firstThrottledAt = -1;
 
+    // Deliberately malformed ID: NestJS runs Guards (ApiKeyGuard,
+    // ThrottlerGuard) BEFORE Pipes, so this still exercises the throttle
+    // counter on every request, but fails ParseUUIDPipe with a 400 before
+    // ever reaching the controller/database. Using a real account ID here
+    // previously meant every one of the 105 requests did a full DB
+    // round-trip — fine locally, but on slower/shared CI hardware, 100
+    // sequential DB-backed requests could take longer than the 60s
+    // ThrottlerModule window, so the counter never reached the limit
+    // within a single window and the test flaked in CI (never locally).
+    // This version's requests are in-memory only, so timing no longer
+    // depends on the DB or the environment's request latency.
+    //
     // ThrottlerModule.forRoot([{ ttl: 60_000, limit: 100 }]) in app.module.ts
     for (let i = 1; i <= 105; i++) {
       const response = await app.inject({
         method: 'GET',
-        url: '/api/v1/accounts/00000000-0000-0000-0000-000000000000',
+        url: '/api/v1/accounts/not-a-valid-uuid',
         headers,
       });
       if (response.statusCode === 429) {
@@ -46,6 +58,7 @@ describe('Global rate limiting (integration)', () => {
         firstThrottledAt = i;
         break;
       }
+      expect(response.statusCode).toBe(400); // ParseUUIDPipe rejection
     }
 
     expect(sawTooManyRequests).toBe(true);

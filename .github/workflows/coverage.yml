@@ -57,6 +57,10 @@ jobs:
             -f database/triggers/003_immutability_triggers.sql
           PGPASSWORD=ledger_pass psql -h localhost -p 5433 -U ledger_user -d ledger_test_db \
             -f database/triggers/008_partition_ledger_entries.sql
+          PGPASSWORD=ledger_pass psql -h localhost -p 5433 -U ledger_user -d ledger_test_db \
+            -f database/triggers/010_add_platform_operating_cash_account.sql
+          PGPASSWORD=ledger_pass psql -h localhost -p 5433 -U ledger_user -d ledger_test_db \
+            -f database/triggers/011_add_ngn_localization_accounts.sql
 
       - name: Seed database
         run: npm run db:seed:test
