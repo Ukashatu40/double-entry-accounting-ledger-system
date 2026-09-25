@@ -15,7 +15,24 @@ COPY . .
 RUN npx prisma generate
 RUN npm run build
 
+# ── development stage ────────────────────────
+FROM base AS development
+ENV NODE_ENV=development
+
+COPY package*.json ./
+RUN npm ci
+COPY . .
+RUN npx prisma generate
+
+EXPOSE 3000
+CMD ["npm", "run", "start:dev"]
+
 # ── production stage ─────────────────────────
+# Kept as the LAST stage in this file deliberately: `docker build .` with
+# no --target builds whichever stage is last, and Render's Blueprint here
+# doesn't pass a target — it was silently building `development` (and its
+# `nest start --watch`, a memory-hungry TS watch compiler) instead of this
+# stage, which is what actually OOM'd on Render's small instance.
 FROM base AS production
 ENV NODE_ENV=production
 
@@ -35,15 +52,3 @@ RUN chmod +x docker-entrypoint.sh
 
 EXPOSE 3000
 ENTRYPOINT ["./docker-entrypoint.sh"]
-
-# ── development stage ────────────────────────
-FROM base AS development
-ENV NODE_ENV=development
-
-COPY package*.json ./
-RUN npm ci
-COPY . .
-RUN npx prisma generate
-
-EXPOSE 3000
-CMD ["npm", "run", "start:dev"]

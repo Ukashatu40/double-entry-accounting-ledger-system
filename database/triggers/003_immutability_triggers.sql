@@ -99,6 +99,10 @@ CREATE TRIGGER trg_prevent_exchange_rate_delete
   EXECUTE FUNCTION prevent_ledger_entry_delete();
 
 -- ── Verify triggers are installed ────────────────────────────────────────────
+-- ledger_entries is a partitioned table — PostgreSQL clones a trigger
+-- defined on the partitioned parent into every partition, so counting all
+-- rows matching these trigger names would count once per partition (dozens
+-- of rows), not once per trigger. Scope to the two parent tables only.
 DO $$
 BEGIN
   ASSERT (
@@ -109,6 +113,7 @@ BEGIN
       'trg_prevent_exchange_rate_update',
       'trg_prevent_exchange_rate_delete'
     )
+    AND event_object_table IN ('ledger_entries', 'exchange_rate_snapshots')
   ) = 4,
   'Expected 4 immutability triggers to be installed';
 

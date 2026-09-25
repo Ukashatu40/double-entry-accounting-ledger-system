@@ -12,13 +12,16 @@
 //    run before the trigger files below, not after — 010 and 011 each
 //    insert a handful of accounts themselves, so checking afterward would
 //    see a non-zero count on a fresh database and skip seeding entirely.)
-// 2. Apply the four trigger/data-migration SQL files — each is
-//    individually idempotent (IF NOT EXISTS / DROP ... IF EXISTS /
-//    ON CONFLICT DO NOTHING guards), verified by the fact the CI
-//    workflows already re-run them on every job. Safe to run after seed
-//    even though seed's own account list already includes the same
-//    codes (1050, 1004, 2040-2042, etc.) — these become no-ops in that
-//    case and only matter for a database seeded before 010/011 existed.
+// 2. Apply the trigger/data-migration SQL files. 003, 010, and 011 are
+//    genuinely idempotent (DROP ... IF EXISTS / CREATE OR REPLACE /
+//    ON CONFLICT DO NOTHING guards) and safe to re-run every boot. 008 is
+//    NOT — it's a one-time structural conversion of ledger_entries to a
+//    partitioned table (CREATE TABLE ledger_entries_y2025 etc., no IF NOT
+//    EXISTS), so it's explicitly skipped below once that conversion has
+//    already happened. This split was only found by testing a real
+//    second boot against an already-migrated database — CI never catches
+//    it because every CI job starts from a fresh, unmigrated database and
+//    only ever runs these files once.
 import * as dotenv from 'dotenv';
 import { Pool } from 'pg';
 import { execFileSync } from 'node:child_process';
@@ -55,6 +58,16 @@ async function main(): Promise<void> {
     const triggersDir = join(__dirname, '..', '..', 'database', 'triggers');
 
     for (const file of TRIGGER_FILES) {
+      if (file === '008_partition_ledger_entries.sql') {
+        const { rows } = await pool.query<{ relkind: string }>(
+          `SELECT relkind FROM pg_class WHERE relname = 'ledger_entries'`,
+        );
+        if (rows[0]?.relkind === 'p') {
+          console.log(`→ Skipping ${file} — ledger_entries is already partitioned.`);
+          continue;
+        }
+      }
+
       const sql = readFileSync(join(triggersDir, file), 'utf8');
       console.log(`→ Applying ${file}...`);
       // A single multi-statement query over the simple protocol (no
