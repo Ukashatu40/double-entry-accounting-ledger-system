@@ -24,6 +24,8 @@ import { CreateJournalEntryDto } from './dto/create-journal-entry.dto';
 import { LedgerEntryResponseDto } from './dto/ledger-entry-response.dto';
 import { AuditActor } from '@common/decorators/audit-actor.decorator';
 import { IdempotencyKey } from '@common/decorators/idempotency.decorator';
+import { Roles } from '@common/decorators/roles.decorator';
+import { Role } from '@common/types/role.type';
 
 @ApiTags('ledger')
 @ApiSecurity('api-key')
@@ -32,12 +34,15 @@ export class LedgerController {
   constructor(private readonly service: LedgerService) {}
 
   @Post('journal-entries')
+  @Roles(Role.ADMIN)
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({
     summary: 'Post a journal entry',
     description:
       'Creates a balanced set of debit/credit lines atomically. ' +
-      'Requires X-Idempotency-Key header to prevent duplicate posting.',
+      'Requires X-Idempotency-Key header to prevent duplicate posting. ' +
+      'ADMIN-only: this bypasses the business-rule validation the normal ' +
+      '/transactions endpoint enforces for its 22 typed transaction kinds.',
   })
   @ApiCreatedResponse({ description: 'Journal entry posted successfully' })
   async postJournalEntry(

@@ -13,6 +13,7 @@ const sharedModuleNameMapper = {
   '^@audit/(.*)$': '<rootDir>/src/audit/$1',
   '^@reporting/(.*)$': '<rootDir>/src/reporting/$1',
   '^@health/(.*)$': '<rootDir>/src/health/$1',
+  '^@auth/(.*)$': '<rootDir>/src/auth/$1',
 };
 
 const config: Config = {

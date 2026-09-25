@@ -5,6 +5,8 @@ import { ReversalsService } from './reversals.service';
 import { FullReversalDto, PartialRefundDto } from './dto/reversal.dto';
 import { AuditActor } from '@common/decorators/audit-actor.decorator';
 import { IdempotencyKey } from '@common/decorators/idempotency.decorator';
+import { Roles } from '@common/decorators/roles.decorator';
+import { Role } from '@common/types/role.type';
 
 @ApiTags('reversals')
 @ApiSecurity('api-key')
@@ -13,6 +15,7 @@ export class ReversalsController {
   constructor(private readonly service: ReversalsService) {}
 
   @Post('full')
+  @Roles(Role.OPERATOR)
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({
     summary: 'Full reversal of a transaction',
@@ -35,6 +38,7 @@ export class ReversalsController {
   }
 
   @Post('partial')
+  @Roles(Role.OPERATOR)
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({
     summary: 'Partial refund with configurable fee policy',

@@ -7,6 +7,7 @@ import { LoggerModule } from 'nestjs-pino';
 import { uuidv7 } from 'uuidv7';
 import { DatabaseModule } from '@database/database.module';
 import { HealthModule } from '@health/health.module';
+import { AuthModule } from '@auth/auth.module';
 import { AccountsModule } from '@accounts/accounts.module';
 import { LedgerModule } from '@ledger/ledger.module';
 import { TransactionsModule } from '@transactions/transactions.module';
@@ -17,6 +18,7 @@ import { ReversalsModule } from '@reversals/reversals.module';
 import { GlobalExceptionFilter } from '@common/filters/global-exception.filter';
 import { RequestIdInterceptor } from '@common/interceptors/request-id.interceptor';
 import { ApiKeyGuard } from '@common/guards/api-key.guard';
+import { RolesGuard } from '@common/guards/roles.guard';
 import appConfig from '@config/app.config';
 import databaseConfig from '@config/database.config';
 
@@ -72,6 +74,7 @@ import databaseConfig from '@config/database.config';
 
     DatabaseModule,
     HealthModule,
+    AuthModule,
     AccountsModule,
     LedgerModule,
     TransactionsModule,
@@ -91,6 +94,11 @@ import databaseConfig from '@config/database.config';
 
     // Global API key guard — every route protected unless @Public()
     { provide: APP_GUARD, useClass: ApiKeyGuard },
+
+    // Role-tier enforcement (VIEWER/OPERATOR/ADMIN) — runs after
+    // ApiKeyGuard, which has already rejected any invalid key by the time
+    // this executes. See @Roles() usage on individual controller methods.
+    { provide: APP_GUARD, useClass: RolesGuard },
 
     // Global rate limit guard — see ThrottlerModule.forRoot() above
     { provide: APP_GUARD, useClass: ThrottlerGuard },

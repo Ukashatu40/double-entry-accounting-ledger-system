@@ -12,6 +12,8 @@ import { FxRateService } from './fx-rate.service';
 import { FxRevaluationService } from './fx-revaluation.service';
 
 import { CreateExchangeRateDto, ExchangeRateResponseDto } from './dto/exchange-rate.dto';
+import { Roles } from '@common/decorators/roles.decorator';
+import { Role } from '@common/types/role.type';
 
 @ApiTags('fx')
 @ApiSecurity('api-key')
@@ -23,6 +25,7 @@ export class FxController {
   ) {}
 
   @Post('rates')
+  @Roles(Role.OPERATOR)
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({
     summary: 'Ingest a new exchange rate snapshot',
@@ -91,6 +94,7 @@ export class FxController {
   }
 
   @Post('revaluation/run')
+  @Roles(Role.ADMIN)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Run the unrealised FX gain/loss revaluation batch job',

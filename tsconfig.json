@@ -33,7 +33,8 @@
       "@reversals/*": ["src/reversals/*"],
       "@audit/*": ["src/audit/*"],
       "@reporting/*": ["src/reporting/*"],
-      "@health/*": ["src/health/*"]
+      "@health/*": ["src/health/*"],
+      "@auth/*": ["src/auth/*"]
     }
   },
   "include": ["src/**/*", "seeds/**/*", "scripts/**/*", "tests/**/*"],

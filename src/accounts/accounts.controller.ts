@@ -23,6 +23,15 @@ import { AccountsService } from './accounts.service';
 import { CreateAccountDto } from './dto/create-account.dto';
 import { AccountQueryDto } from './dto/account-query.dto';
 import { AccountResponseDto } from './dto/account-response.dto';
+import { Roles } from '@common/decorators/roles.decorator';
+import { Role } from '@common/types/role.type';
+
+export interface PaginatedAccountsResponse {
+  data: AccountResponseDto[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
 
 @ApiTags('accounts')
 @ApiSecurity('api-key')
@@ -31,6 +40,7 @@ export class AccountsController {
   constructor(private readonly service: AccountsService) {}
 
   @Post()
+  @Roles(Role.OPERATOR)
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({
     summary: 'Create a new account',
@@ -46,14 +56,15 @@ export class AccountsController {
 
   @Get()
   @ApiOperation({
-    summary: 'List all accounts',
+    summary: 'List accounts, paginated',
     description:
-      'Returns the full Chart of Accounts, optionally filtered by type, status, or currency.',
+      'Returns a page of the Chart of Accounts, optionally filtered by type, status, or ' +
+      'currency. Defaults to page 1, pageSize 50 (max 200) if not given.',
   })
-  @ApiOkResponse({ type: [AccountResponseDto] })
-  async findAll(@Query() query: AccountQueryDto): Promise<AccountResponseDto[]> {
-    const accounts = await this.service.findAll(query);
-    return accounts.map(AccountResponseDto.fromPrisma);
+  @ApiOkResponse({ description: 'Paginated accounts: { data, total, page, pageSize }' })
+  async findAll(@Query() query: AccountQueryDto): Promise<PaginatedAccountsResponse> {
+    const { data, total, page, pageSize } = await this.service.findAll(query);
+    return { data: data.map(AccountResponseDto.fromPrisma), total, page, pageSize };
   }
 
   @Get(':id')
@@ -75,6 +86,7 @@ export class AccountsController {
   }
 
   @Patch(':id/deactivate')
+  @Roles(Role.ADMIN)
   @ApiOperation({
     summary: 'Deactivate an account',
     description:

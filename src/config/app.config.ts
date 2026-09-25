@@ -1,11 +1,17 @@
 // src/config/app.config.ts
 import { registerAs } from '@nestjs/config';
+import { Role, isRole } from '@common/types/role.type';
+
+export interface ApiKeyEntry {
+  key: string;
+  role: Role;
+}
 
 export interface AppConfig {
   nodeEnv: string;
   port: number;
   apiPrefix: string;
-  apiKeys: string[];
+  apiKeys: ApiKeyEntry[];
   genesisHash: string;
   idempotencyTtlHours: number;
   fxRateMaxAgeMinutes: number;
@@ -14,16 +20,38 @@ export interface AppConfig {
   metricsEnabled: boolean;
 }
 
+/**
+ * API_KEYS format: comma-separated `key` or `key:ROLE` entries, e.g.
+ *   API_KEYS=admin-key:ADMIN,ops-key:OPERATOR,view-key:VIEWER
+ * A bare key with no `:ROLE` suffix defaults to ADMIN — this keeps the
+ * original single-key setup (API_KEYS=some-key, full access, no tiers)
+ * working unchanged; scoping a key down to OPERATOR/VIEWER is opt-in.
+ */
+function parseApiKeys(raw: string): ApiKeyEntry[] {
+  return raw
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+    .map((entry) => {
+      const [key, roleRaw] = entry.split(':').map((part) => part.trim());
+      if (roleRaw) {
+        if (!isRole(roleRaw)) {
+          throw new Error(
+            `API_KEYS: invalid role "${roleRaw}" for key "${key}" — must be one of VIEWER, OPERATOR, ADMIN`,
+          );
+        }
+        return { key, role: roleRaw };
+      }
+      return { key, role: Role.ADMIN };
+    });
+}
+
 export default registerAs('app', (): AppConfig => {
   const port = parseInt(process.env.PORT ?? '3000', 10);
   const idempotencyTtlHours = parseInt(process.env.IDEMPOTENCY_TTL_HOURS ?? '24', 10);
   const fxRateMaxAgeMinutes = parseInt(process.env.FX_RATE_MAX_AGE_MINUTES ?? '60', 10);
 
-  const apiKeysRaw = process.env.API_KEYS ?? '';
-  const apiKeys = apiKeysRaw
-    .split(',')
-    .map((k) => k.trim())
-    .filter(Boolean);
+  const apiKeys = parseApiKeys(process.env.API_KEYS ?? '');
 
   if (apiKeys.length === 0) {
     throw new Error('API_KEYS environment variable must contain at least one key');

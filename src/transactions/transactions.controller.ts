@@ -5,6 +5,8 @@ import { TransactionsService } from './transactions.service';
 import { CreateTransactionDto } from './dto/create-transaction.dto';
 import { AuditActor } from '@common/decorators/audit-actor.decorator';
 import { IdempotencyKey } from '@common/decorators/idempotency.decorator';
+import { Roles } from '@common/decorators/roles.decorator';
+import { Role } from '@common/types/role.type';
 
 @ApiTags('transactions')
 @ApiSecurity('api-key')
@@ -13,6 +15,7 @@ export class TransactionsController {
   constructor(private readonly service: TransactionsService) {}
 
   @Post()
+  @Roles(Role.OPERATOR)
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({
     summary: 'Process a transaction',

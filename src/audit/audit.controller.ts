@@ -2,6 +2,8 @@
 import { Controller, Get, Query } from '@nestjs/common';
 import { ApiTags, ApiSecurity, ApiOperation, ApiOkResponse, ApiQuery } from '@nestjs/swagger';
 import { AuditService } from './audit.service';
+import { Roles } from '@common/decorators/roles.decorator';
+import { Role } from '@common/types/role.type';
 
 @ApiTags('audit')
 @ApiSecurity('api-key')
@@ -28,6 +30,7 @@ export class AuditController {
   }
 
   @Get('export')
+  @Roles(Role.ADMIN)
   @ApiOperation({
     summary: 'Export tamper-evident ledger package',
     description:

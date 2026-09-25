@@ -15,6 +15,8 @@ import { BalanceSheetService } from './balance-sheet.service';
 import { FxExposureService } from './fx-exposure.service';
 import { ReconciliationService } from './reconciliation.service';
 import { ReconciliationRequestDto } from './dto/reconciliation.dto';
+import { Roles } from '@common/decorators/roles.decorator';
+import { Role } from '@common/types/role.type';
 
 @ApiTags('reporting')
 @ApiSecurity('api-key')
@@ -89,6 +91,7 @@ export class ReportingController {
   }
 
   @Post('reconciliation')
+  @Roles(Role.OPERATOR)
   @ApiOperation({
     summary: 'Reconcile ledger transactions against an external statement',
     description:

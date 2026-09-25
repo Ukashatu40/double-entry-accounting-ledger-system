@@ -3,6 +3,8 @@ import { UnauthorizedException, type ExecutionContext } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Reflector } from '@nestjs/core';
 import { ApiKeyGuard } from '@common/guards/api-key.guard';
+import { Role } from '@common/types/role.type';
+import type { ApiKeyEntry } from '@config/app.config';
 
 function makeMockContext(headers: Record<string, string> = {}): ExecutionContext {
   return {
@@ -12,9 +14,9 @@ function makeMockContext(headers: Record<string, string> = {}): ExecutionContext
   } as unknown as ExecutionContext;
 }
 
-function makeConfigService(keys: string[]): ConfigService {
+function makeConfigService(entries: ApiKeyEntry[]): ConfigService {
   return {
-    get: (key: string) => (key === 'app' ? { apiKeys: keys } : undefined),
+    get: (key: string) => (key === 'app' ? { apiKeys: entries } : undefined),
   } as unknown as ConfigService;
 }
 
@@ -25,7 +27,7 @@ describe('ApiKeyGuard', () => {
     const reflector = {
       getAllAndOverride: jest.fn().mockReturnValue(isPublic),
     } as unknown as Reflector;
-    return new ApiKeyGuard(reflector, makeConfigService([VALID_KEY]));
+    return new ApiKeyGuard(reflector, makeConfigService([{ key: VALID_KEY, role: Role.ADMIN }]));
   }
 
   it('allows access to a route marked @Public() with no API key', () => {
@@ -60,13 +62,17 @@ describe('ApiKeyGuard', () => {
     expect(() => new ApiKeyGuard(reflector, emptyConfig)).toThrow('App configuration missing');
   });
 
-  it('accepts any one of multiple configured API keys', () => {
+  it('accepts any one of multiple configured API keys, regardless of role', () => {
     const reflector = {
       getAllAndOverride: jest.fn().mockReturnValue(false),
     } as unknown as Reflector;
     const guard = new ApiKeyGuard(
       reflector,
-      makeConfigService(['key-one', 'key-two', 'key-three']),
+      makeConfigService([
+        { key: 'key-one', role: Role.ADMIN },
+        { key: 'key-two', role: Role.VIEWER },
+        { key: 'key-three', role: Role.OPERATOR },
+      ]),
     );
     const context = makeMockContext({ 'x-api-key': 'key-two' });
     expect(guard.canActivate(context)).toBe(true);
