@@ -4,6 +4,14 @@ import type { Account, AccountStatus, AccountType, Prisma } from '@prisma/client
 import { DatabaseService } from '@database/database.service';
 import type { CreateAccountDto } from './dto/create-account.dto';
 import type { AccountQueryDto } from './dto/account-query.dto';
+import { DEFAULT_ACCOUNTS_PAGE_SIZE } from './dto/account-query.dto';
+
+export interface PaginatedAccounts {
+  data: Account[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
 
 @Injectable()
 export class AccountsRepository {
@@ -23,17 +31,27 @@ export class AccountsRepository {
     });
   }
 
-  async findAll(query: AccountQueryDto): Promise<Account[]> {
+  async findAll(query: AccountQueryDto): Promise<PaginatedAccounts> {
     const where: Prisma.AccountWhereInput = {};
 
     if (query.type) where.type = query.type;
     if (query.status) where.status = query.status;
     if (query.currency) where.currency = query.currency;
 
-    return this.db.account.findMany({
-      where,
-      orderBy: { code: 'asc' },
-    });
+    const page = query.page ?? 1;
+    const pageSize = query.pageSize ?? DEFAULT_ACCOUNTS_PAGE_SIZE;
+
+    const [data, total] = await Promise.all([
+      this.db.account.findMany({
+        where,
+        orderBy: { code: 'asc' },
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+      }),
+      this.db.account.count({ where }),
+    ]);
+
+    return { data, total, page, pageSize };
   }
 
   async findById(id: string): Promise<Account> {

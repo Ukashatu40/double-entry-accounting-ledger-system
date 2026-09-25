@@ -74,11 +74,12 @@ describe('AccountsService', () => {
   });
 
   describe('findAll', () => {
-    it('delegates to the repository with the given query', async () => {
-      repo.findAll.mockResolvedValue([makeAccount()]);
+    it('delegates to the repository with the given query and returns its paginated result as-is', async () => {
+      const paginated = { data: [makeAccount()], total: 1, page: 1, pageSize: 50 };
+      repo.findAll.mockResolvedValue(paginated);
       const result = await service.findAll({ type: 'ASSET' } as never);
       expect(repo.findAll).toHaveBeenCalledWith({ type: 'ASSET' });
-      expect(result).toHaveLength(1);
+      expect(result).toEqual(paginated);
     });
   });
 

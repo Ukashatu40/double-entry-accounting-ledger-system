@@ -48,10 +48,17 @@ describe('AccountsController', () => {
     expect(result.code).toBe('1099');
   });
 
-  it('findAll() delegates to the service with the query and maps results', async () => {
-    service.findAll.mockResolvedValue([makeAccount(), makeAccount({ id: 'acc-2', code: '1002' })]);
+  it('findAll() delegates to the service, maps each account, and preserves pagination metadata', async () => {
+    service.findAll.mockResolvedValue({
+      data: [makeAccount(), makeAccount({ id: 'acc-2', code: '1002' })],
+      total: 2,
+      page: 1,
+      pageSize: 50,
+    });
     const result = await controller.findAll({} as never);
-    expect(result).toHaveLength(2);
+    expect(result.data).toHaveLength(2);
+    expect(result.data[0].code).toBe('1099');
+    expect(result).toMatchObject({ total: 2, page: 1, pageSize: 50 });
   });
 
   it('findById() returns a single mapped account', async () => {

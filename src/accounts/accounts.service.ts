@@ -1,7 +1,7 @@
 // src/accounts/accounts.service.ts
 import { Injectable, ConflictException } from '@nestjs/common';
 import type { Account } from '@prisma/client';
-import { AccountsRepository } from './accounts.repository';
+import { AccountsRepository, type PaginatedAccounts } from './accounts.repository';
 import type { CreateAccountDto } from './dto/create-account.dto';
 import type { AccountQueryDto } from './dto/account-query.dto';
 
@@ -17,7 +17,7 @@ export class AccountsService {
     return this.repo.create(dto);
   }
 
-  async findAll(query: AccountQueryDto): Promise<Account[]> {
+  async findAll(query: AccountQueryDto): Promise<PaginatedAccounts> {
     return this.repo.findAll(query);
   }
 

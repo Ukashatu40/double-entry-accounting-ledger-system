@@ -76,19 +76,48 @@ describe('AccountsRepository', () => {
   });
 
   describe('findAll', () => {
-    it('builds an empty where clause when no filters are given', async () => {
+    it('builds an empty where clause and defaults to page 1 / pageSize 50 when no filters are given', async () => {
       db.account.findMany.mockResolvedValue([]);
+      db.account.count.mockResolvedValue(0);
       await repo.findAll({} as never);
-      expect(db.account.findMany).toHaveBeenCalledWith({ where: {}, orderBy: { code: 'asc' } });
+      expect(db.account.findMany).toHaveBeenCalledWith({
+        where: {},
+        orderBy: { code: 'asc' },
+        skip: 0,
+        take: 50,
+      });
     });
 
     it('filters by type, status, and currency when all are provided', async () => {
       db.account.findMany.mockResolvedValue([]);
+      db.account.count.mockResolvedValue(0);
       await repo.findAll({ type: 'ASSET', status: 'ACTIVE', currency: 'INR' } as never);
       expect(db.account.findMany).toHaveBeenCalledWith({
         where: { type: 'ASSET', status: 'ACTIVE', currency: 'INR' },
         orderBy: { code: 'asc' },
+        skip: 0,
+        take: 50,
       });
+    });
+
+    it('computes skip from page and pageSize', async () => {
+      db.account.findMany.mockResolvedValue([]);
+      db.account.count.mockResolvedValue(0);
+      await repo.findAll({ page: 3, pageSize: 20 } as never);
+      expect(db.account.findMany).toHaveBeenCalledWith({
+        where: {},
+        orderBy: { code: 'asc' },
+        skip: 40,
+        take: 20,
+      });
+    });
+
+    it('returns data, total (from count), page, and pageSize', async () => {
+      const accounts = [makeAccount(), makeAccount({ id: 'acc-2', code: '1002' })];
+      db.account.findMany.mockResolvedValue(accounts);
+      db.account.count.mockResolvedValue(37);
+      const result = await repo.findAll({ page: 2, pageSize: 20 } as never);
+      expect(result).toEqual({ data: accounts, total: 37, page: 2, pageSize: 20 });
     });
   });
 
