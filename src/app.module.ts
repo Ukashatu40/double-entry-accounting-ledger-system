@@ -34,8 +34,14 @@ import databaseConfig from '@config/database.config';
     LoggerModule.forRoot({
       pinoHttp: {
         level: process.env.LOG_LEVEL ?? 'info',
+        // pino-pretty is a devDependency, never installed in the production
+        // image (npm ci --only=production) — gating on NODE_ENV too means a
+        // stray LOG_PRETTY=true in a production environment (e.g. copied
+        // from local dev's docker-compose.yml, which sets it for its own
+        // full-devDependency `development` build target) can never crash
+        // the app at boot trying to require a module that isn't there.
         transport:
-          process.env.LOG_PRETTY === 'true'
+          process.env.NODE_ENV !== 'production' && process.env.LOG_PRETTY === 'true'
             ? {
                 target: 'pino-pretty',
                 options: {
