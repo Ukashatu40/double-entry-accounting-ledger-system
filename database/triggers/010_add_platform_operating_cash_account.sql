@@ -8,7 +8,14 @@
 -- referenced in spec A7.3's list of five required migration demonstrations.
 -- Idempotent: safe to re-run.
 
-INSERT INTO accounts (id, code, name, type, sub_type, currency, status, description)
+-- BUG FIX (found deploying against a genuinely fresh database — every
+-- prior run had account 1050 already present from earlier seeding, so
+-- ON CONFLICT DO NOTHING silently skipped the INSERT and never actually
+-- exercised it): `updated_at` has no DB-level default (Prisma's
+-- @updatedAt is an application-layer behavior, not a column DEFAULT), so
+-- omitting it here violated the NOT NULL constraint on any real insert.
+-- Same fix already applied in 011_add_ngn_localization_accounts.sql.
+INSERT INTO accounts (id, code, name, type, sub_type, currency, status, description, created_at, updated_at)
 VALUES (
   gen_random_uuid(),
   '1050',
@@ -20,7 +27,9 @@ VALUES (
   'System clearing account used to balance journal entries that split a ' ||
   'single wallet movement across a correctly-signed counterparty leg AND ' ||
   'a Revenue/Expense leg (e.g. P2P transfer with a fee, cashback funded ' ||
-  'from bank operating cash). Not a caller-selectable account.'
+  'from bank operating cash). Not a caller-selectable account.',
+  now(),
+  now()
 )
 ON CONFLICT (code) DO NOTHING;
 

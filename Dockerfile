@@ -22,10 +22,19 @@ ENV NODE_ENV=production
 COPY --from=deps /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/prisma ./prisma
+# Prisma 7's config file — schema.prisma's own `url` line is deliberately
+# commented out in favor of this (see prisma.config.ts); without it,
+# `prisma migrate deploy` fails with "datasource.url property is required."
+COPY --from=builder /app/prisma.config.ts ./
 COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
+# The trigger/data-migration SQL files bootstrap-db.js applies at boot —
+# see docker-entrypoint.sh. Raw .sql, not part of the TS build output.
+COPY --from=builder /app/database ./database
+COPY docker-entrypoint.sh ./
+RUN chmod +x docker-entrypoint.sh
 
 EXPOSE 3000
-CMD ["node", "dist/main"]
+ENTRYPOINT ["./docker-entrypoint.sh"]
 
 # ── development stage ────────────────────────
 FROM base AS development
